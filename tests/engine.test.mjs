@@ -395,3 +395,128 @@ test('registry: global LayerRegistry singleton is exposed', () => {
   assert.ok(ctx.LayerRegistry instanceof SDX.ModuleRegistry);
   assert.equal(ctx.LayerRegistry, SDX.LayerRegistry);
 });
+
+// ---------------------------------------------------------------- opening hours
+// Local-time dates: 2026-09-28 is a Monday.
+const at = (y, m, d, hh, mm = 0) => new Date(y, m - 1, d, hh, mm);
+const MON = (hh, mm) => at(2026, 9, 28, hh, mm);
+const TUE = (hh, mm) => at(2026, 9, 29, hh, mm);
+const FRI = (hh, mm) => at(2026, 10, 2, hh, mm);
+const SAT = (hh, mm) => at(2026, 10, 3, hh, mm);
+const SUN = (hh, mm) => at(2026, 10, 4, hh, mm);
+
+test('hours: 24/7, day ranges, lists and multiple spans', () => {
+  const { isOpenAt } = SDX.hours;
+  assert.equal(isOpenAt('24/7', MON(3)), true);
+  const h = 'Mo-Th 16:00-23:00; Fr-Sa 12:00-23:00; Su 12:00-22:00';
+  assert.equal(isOpenAt(h, MON(17)), true);
+  assert.equal(isOpenAt(h, MON(15, 59)), false);
+  assert.equal(isOpenAt(h, SAT(12, 30)), true);
+  assert.equal(isOpenAt(h, SUN(22, 30)), false);
+  assert.equal(isOpenAt('Mo-Fr 11:00-14:00,17:00-21:00', TUE(15)), false);
+  assert.equal(isOpenAt('Mo-Fr 11:00-14:00,17:00-21:00', TUE(18)), true);
+  assert.equal(isOpenAt('Mo,Tu 09:00-17:00', TUE(10)), true);
+  assert.equal(isOpenAt('Fr, Sa 09:00-17:00', SAT(10)), true);
+  assert.equal(isOpenAt('10:00-20:00', SUN(11)), true, 'no days = every day');
+});
+
+test('hours: spans past midnight spill into the next morning', () => {
+  const { isOpenAt } = SDX.hours;
+  const h = 'Mo,Tu 12:00-21:00;We,Th 12:00-23:00;Fr, Sa 12:00-01:00;Su 12:00-22:00';
+  assert.equal(isOpenAt(h, SAT(0, 30)), true, 'Friday 12:00-01:00 covers early Saturday');
+  assert.equal(isOpenAt(h, SUN(0, 30)), true, 'Saturday spills into Sunday');
+  assert.equal(isOpenAt(h, MON(0, 30)), false, 'Sunday closes at 22:00');
+  assert.equal(isOpenAt(h, SAT(1, 30)), false);
+});
+
+test('hours: later rules override earlier ones; off/closed; unknown stays null', () => {
+  const { isOpenAt } = SDX.hours;
+  assert.equal(isOpenAt('Mo-Fr 08:00-17:00; Fr off', FRI(10)), false);
+  assert.equal(isOpenAt('Mo-Fr 08:00-17:00; Fr off', TUE(10)), true);
+  assert.equal(isOpenAt('Mo-Su 09:00-17:00; PH off', TUE(10)), true, 'holiday rules are ignored');
+  for (const bad of ['', 'by appointment', 'sunrise-sunset', 'Mo-Fr 9am-5pm']) {
+    assert.equal(isOpenAt(bad, TUE(10)), null, `"${bad}" should be unknown`);
+  }
+  assert.equal(isOpenAt(undefined, TUE(10)), null);
+});
+
+test('hours: nextChange reports when a spot closes or opens', () => {
+  const { nextChange } = SDX.hours;
+  const h = 'Mo-Th 16:00-23:00; Fr-Sa 12:00-23:00; Su 12:00-22:00';
+  const a = nextChange(h, MON(17));
+  assert.equal(a.open, true);
+  assert.equal(a.at.getHours(), 23);
+  const b = nextChange(h, MON(12));
+  assert.equal(b.open, false);
+  assert.equal(b.at.getHours(), 16);
+  assert.equal(nextChange('24/7', MON(12)).at, null, '24/7 never changes');
+  assert.equal(nextChange('by appointment', MON(12)), null);
+});
+
+// ---------------------------------------------------------------- new filters
+const fake = (id, type, lat, lon, hours) => ({ id, name: id, type, lat, lon, hours, tags: { hazyIPA: false, open247: false, bajaFish: false } });
+
+test('filters: openNow hides known-closed spots and keeps unknown hours', () => {
+  const pois = [
+    fake('open', 'taco', 32.75, -117.13, 'Mo-Su 09:00-21:00'),
+    fake('closed', 'taco', 32.75, -117.13, 'Mo-Su 18:00-21:00'),
+    fake('unknown', 'taco', 32.75, -117.13, ''),
+  ];
+  const out = Array.from(applyFilters(pois, { openNow: true, now: MON(12) }), (p) => p.id);
+  assert.deepEqual(out, ['open', 'unknown']);
+});
+
+test('filters: crawlable honors a custom walk radius', () => {
+  const n = (mi) => applyFilters(landmarks, { crawlable: true, radiusMi: mi }).length;
+  assert.ok(n(0.25) < n(1.5), `${n(0.25)} !< ${n(1.5)}`);
+  assert.ok(n(1.5) < n(3), `${n(1.5)} !< ${n(3)}`);
+  assert.equal(n(1.5), applyFilters(landmarks, { crawlable: true }).length, '1.5 mi is the default');
+});
+
+test('filters: near keeps only spots within the distance of you', () => {
+  const me = { lat: 32.7479, lon: -117.1296 }; // North Park
+  const n1 = applyFilters(landmarks, { near: { ...me, mi: 1 } });
+  const n5 = applyFilters(landmarks, { near: { ...me, mi: 5 } });
+  assert.ok(n1.length > 0 && n1.length < n5.length);
+  for (const p of n5) assert.ok(haversineMi(me, p) <= 5);
+});
+
+// ---------------------------------------------------------------- NWS
+const HOUR = 3600e3;
+const t0 = Date.UTC(2026, 8, 26, 10);
+
+test('nws: expandSeries spreads ISO-8601 intervals into hourly values', () => {
+  const m = SDX.nws.expandSeries([
+    { validTime: '2026-09-26T10:00:00+00:00/PT4H', value: 21.1 },
+    { validTime: '2026-09-26T14:00:00+00:00/PT1H', value: 20.5 },
+    { validTime: '2026-09-26T15:00:00+00:00/P1DT2H', value: 19 },
+  ]);
+  assert.equal(m.get(t0), 21.1);
+  assert.equal(m.get(t0 + 3 * HOUR), 21.1);
+  assert.equal(m.get(t0 + 4 * HOUR), 20.5);
+  assert.equal(m.get(t0 + 5 * HOUR), 19);
+  assert.equal(m.get(t0 + 5 * HOUR + 25 * HOUR), 19);
+  assert.equal(m.get(t0 + 5 * HOUR + 26 * HOUR), undefined);
+});
+
+test('nws: dayHours gives 24 slots with null gaps; cToF converts', () => {
+  const m = SDX.nws.expandSeries([{ validTime: '2026-09-26T10:00:00+00:00/PT2H', value: 20 }]);
+  const day = Array.from(SDX.nws.dayHours(m, t0 - 10 * HOUR));
+  assert.equal(day.length, 24);
+  assert.equal(day[10], 20);
+  assert.equal(day[11], 20);
+  assert.equal(day[12], null);
+  assert.equal(day[0], null);
+  assert.equal(SDX.nws.cToF(0), 32);
+  assert.equal(SDX.nws.cToF(100), 212);
+  assert.equal(SDX.nws.cToF(null), null);
+});
+
+test('nws: validateGridpoint fails loudly on missing or empty series', () => {
+  const series = (n) => ({ values: Array.from({ length: n }, (_, i) => ({ validTime: `2026-09-26T${10 + i}:00:00+00:00/PT1H`, value: 1 })) });
+  const good = { properties: { temperature: series(3), relativeHumidity: series(3), skyCover: series(3) } };
+  assert.doesNotThrow(() => SDX.nws.validateGridpoint(good));
+  assert.throws(() => SDX.nws.validateGridpoint({ properties: { temperature: series(3), relativeHumidity: series(3) } }), /skyCover/);
+  assert.throws(() => SDX.nws.validateGridpoint({ properties: { temperature: series(0), relativeHumidity: series(3), skyCover: series(3) } }), /temperature/);
+  assert.throws(() => SDX.nws.validateGridpoint(null), /gridpoint/i);
+});

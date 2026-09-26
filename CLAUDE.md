@@ -48,6 +48,18 @@ node scripts/fetch-pois.mjs          # add --dry-run to only report counts
   - An active crawl's pins are moved out of the cluster (`pinOut`/`pinBack`).
 - Neighborhoods have a `tier`. Tier-2 temperature markers fade out below zoom 11 (the `mc-far` class) so the county view stays readable.
 - Microclimates broadcasts `bus.emit('clock', {hour})`. Late subscribers read `bus.last('clock')`.
+- Microclimates `state.source` is `sim` or `live`.
+  - Live mode fetches NWS `/points` → raw `/gridpoints` for each of the 38 areas, 4 requests at a time.
+  - It caches in localStorage: the point→grid mapping for 7 days, the grid data for 1 hour.
+  - An area whose fetch fails shows "—" and is never filled with simulated numbers. If every fetch fails, the app shows a toast and falls back to `sim`.
+  - In live mode the fog shape is driven by coastal sky cover. To test failures, set `window.SDXDebug = { nwsBase: 'bad url' }`.
+- Microclimates `state.metric` is `temp` or `rh`.
+- Tacos & Brews `state` also has:
+  - `radiusMi`: the walk radius, driving Crawlable and crawl routes.
+  - `me` / `nearMi`: Near Me. Location comes from browser geolocation, which needs localhost or https.
+  - `view`: `pins` or `heat`. The heat layer is created on first use.
+- The visible-spots memo is keyed on the filters object plus radius, your location and the current minute (for Open Now).
+- `SDX.hours` reads OSM opening_hours. All 101 hour strings in the data parse. Anything unrecognized returns null ("Hours unknown"), and Open Now dims those spots instead of hiding them.
 - Marine-layer fog uses two SVG panes (`fog`, `fogtex`):
   - Geometry repaints only when `fogFactor` changes.
   - Drift and breathing are CSS transform/opacity animations on the panes (compositor-only).
@@ -56,6 +68,7 @@ node scripts/fetch-pois.mjs          # add --dry-run to only report counts
 - CARTO basemaps need a free per-person API key since 2026-09-23. Without one, tiles show an "API KEY REQUIRED" watermark while still returning HTTP 200.
   - The key is saved from the map-icon popover into localStorage `sdx.cartoKey`. Never hardcode it.
   - With no key, the app falls back to OSM tiles darkened with CSS (`.tiles-osm-dark`).
+- leaflet.heat logs a Canvas2D "willReadFrequently" performance warning once the heatmap is shown. It's third-party and harmless.
 - Tailwind Play CDN logs a console warning ("should not be used in production"). This is expected, not an error.
 - Tailwind preflight sets `img{max-width:100%}`, which breaks Leaflet tiles. It's overridden in CSS, so keep that override.
 - Tests compare engine arrays created inside the vm context. Copy them with `Array.from` before `deepEqual`, because cross-realm prototypes differ.

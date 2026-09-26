@@ -503,6 +503,51 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
 .crawl-hint { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; color: var(--text-2); line-height: 1.45; }
 .crawl-hint svg { width: 18px; height: 18px; flex: none; color: var(--brew-hi); margin-top: 1px; }
 
+/* Segmented controls */
+.seg-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.seg { --n: 2; --k: 0; position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 3px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--hair); min-width: 210px; }
+.seg button { position: relative; z-index: 1; padding: 5px 10px; font-size: 12px; font-weight: 500; color: var(--text-3); border-radius: 7px; transition: color .3s; white-space: nowrap; }
+.seg button:hover { color: var(--text-2); }
+.seg button[aria-checked="true"] { color: var(--text); }
+.seg-ind { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / var(--n)); border-radius: 7px; background: rgba(255,255,255,.09); box-shadow: inset 0 0 0 1px var(--hair-strong); transform: translateX(calc(var(--k) * 100%)); transition: transform .45s var(--ease-out); }
+.seg-row[hidden] { display: none; }
+.live-status { margin-top: 8px; font-size: 11px; }
+.rad-block { margin-top: 14px; }
+.sdx-range.amber::-webkit-slider-runnable-track { background: linear-gradient(90deg, #5c2a06, #c98500, #f2b53a); }
+.sdx-range.amber::-moz-range-track { background: linear-gradient(90deg, #5c2a06, #c98500, #f2b53a); }
+
+/* Microclimates: loading + no-data markers */
+.mc-loading:not(.sdx-temps-off) .sdx-temp { opacity: .45; }
+.sdx-temp.no-data { filter: grayscale(1); }
+
+/* Tacos & Brews: heatmap view crossfades with the pins */
+.hs-heat .sdx-pin, .hs-heat .sdx-cluster { opacity: 0 !important; transform: scale(.5); pointer-events: none; }
+.sdx-cluster { transition: transform .3s var(--ease-out), opacity .4s var(--ease-out); }
+.leaflet-heatmap-layer { opacity: 0; transition: opacity .6s var(--ease-out); pointer-events: none; }
+.hs-heat .leaflet-heatmap-layer { opacity: .9; }
+
+/* Near me */
+.sdx-me { width: 16px; height: 16px; border-radius: 50%; background: #38bdf8; border: 3px solid #fff; animation: sdx-me-pulse 2s ease-out infinite; }
+@keyframes sdx-me-pulse { 0% { box-shadow: 0 0 0 0 rgba(56,189,248,.6), 0 2px 8px rgba(0,0,0,.5); } 100% { box-shadow: 0 0 0 20px rgba(56,189,248,0), 0 2px 8px rgba(0,0,0,.5); } }
+path.near-ring { animation: sdx-ants 3s linear infinite; }
+.fchip.is-loading .check { border-color: var(--marine); animation: sdx-breathe .9s ease-in-out infinite; }
+.near-card .card-h { align-items: center; }
+.near-card[hidden] { display: none; }
+.step .n.brewery, .step .n.taco { background: rgba(255,255,255,.06); font-size: 14px; }
+
+/* Opening-hours line in popups (status color always paired with text) */
+.hours-line { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+.hours-line i { width: 7px; height: 7px; border-radius: 50%; background: #6f7f96; flex: none; }
+.hours-line.open { color: #86efac; } .hours-line.open i { background: #0ca30c; box-shadow: 0 0 8px #0ca30c; }
+.hours-line.closed { color: #fca5a5; } .hours-line.closed i { background: #d03b3b; }
+
+/* Legend swatches for the new modes */
+.lg-ramp.rh { background: linear-gradient(90deg, #cde2fb, #86b6ef 40%, #3987e5 70%, #1c5cab); }
+.lg-ramp.heat { background: linear-gradient(90deg, #5c2a06, #c98500 35%, #f2b53a 60%, #ff7a59 80%, #e5484d); }
+.sw.nodata { background: #5b6474; }
+.sw.dimmed { background: var(--taco); opacity: .3; }
+.sw.you { background: #38bdf8; border: 2px solid #fff; }
+
 /* =====================================================================
    KEYFRAMES
    ===================================================================== */
@@ -607,6 +652,7 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js"></script>
 
@@ -1187,17 +1233,144 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       .map((r) => ({ ...r, minutes: walkMinutes(r.miles) }));
   }
 
-  // Hazy narrows breweries; 24/7 + Baja narrow taco shops. Crawlable then keeps only spots
-  // with the other type within walking range, judged against what the other filters left.
+  // ------------------------------------------------------------------ opening hours
+  // A small OSM opening_hours reader for the formats in our data: 24/7, off/closed, day
+  // ranges/lists, several spans per day, spans past midnight, later rules overriding earlier.
+  // Holiday rules (PH/SH) are skipped. Anything else is UNKNOWN (null), never guessed.
+  const DAY_IDX = { Su: 0, Mo: 1, Tu: 2, We: 3, Th: 4, Fr: 5, Sa: 6 };
+  const hoursCache = new Map();
+
+  function parseDays(expr) {
+    const days = new Set();
+    for (const tok of expr.replace(/\s+/g, '').split(',')) {
+      const [a, b] = tok.split('-');
+      if (!(a in DAY_IDX) || (b !== undefined && !(b in DAY_IDX))) return null;
+      if (b === undefined) { days.add(DAY_IDX[a]); continue; }
+      for (let d = DAY_IDX[a]; ; d = (d + 1) % 7) { days.add(d); if (d === DAY_IDX[b]) break; }
+    }
+    return days;
+  }
+
+  function parseHours(str) {
+    if (typeof str !== 'string' || !str.trim()) return null;
+    if (hoursCache.has(str)) return hoursCache.get(str);
+    let result = null;
+    const s = str.trim();
+    if (s === '24/7') result = { always: true };
+    else {
+      const week = Array(7).fill(null);
+      let ok = false;
+      for (const raw of s.split(';')) {
+        const rule = raw.trim();
+        if (!rule || /^(PH|SH)\b/.test(rule)) continue;
+        const m = /^([A-Z][a-z](?:\s*[-,]\s*[A-Z][a-z])*)\s+(.+)$/.exec(rule);
+        const days = m ? parseDays(m[1]) : new Set([0, 1, 2, 3, 4, 5, 6]);
+        const time = (m ? m[2] : rule).trim();
+        if (!days) { ok = false; break; }
+        let spans;
+        if (/^(off|closed)$/i.test(time)) spans = [];
+        else {
+          spans = [];
+          for (const part of time.split(',')) {
+            const t = /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/.exec(part.trim());
+            if (!t) { spans = null; break; }
+            const start = +t[1] * 60 + +t[2];
+            let end = +t[3] * 60 + +t[4];
+            if (end <= start) end += 1440;
+            spans.push([start, end]);
+          }
+        }
+        if (!spans) { ok = false; break; }
+        for (const d of days) week[d] = spans;
+        ok = true;
+      }
+      result = ok ? { week } : null;
+    }
+    hoursCache.set(str, result);
+    return result;
+  }
+
+  function isOpenAt(str, date) {
+    const h = parseHours(str);
+    if (!h) return null;
+    if (h.always) return true;
+    const d = date.getDay();
+    const min = date.getHours() * 60 + date.getMinutes();
+    if ((h.week[d] || []).some(([a, b]) => min >= a && min < b)) return true;
+    return (h.week[(d + 6) % 7] || []).some(([, b]) => b > 1440 && min + 1440 < b);
+  }
+
+  function nextChange(str, date) {
+    const h = parseHours(str);
+    if (!h) return null;
+    if (h.always) return { open: true, at: null };
+    const open = isOpenAt(str, date);
+    const Q = 15 * 60e3;
+    let t = Math.ceil((date.getTime() + 1) / Q) * Q;
+    for (let i = 0; i < 7 * 96; i++, t += Q) {
+      const at = new Date(t);
+      if (isOpenAt(str, at) !== open) return { open, at };
+    }
+    return { open, at: null };
+  }
+
+  // Hazy narrows breweries; 24/7 + Baja narrow taco shops; openNow hides spots KNOWN to be
+  // closed (unknown hours stay); near keeps spots within near.mi of you. Crawlable then keeps
+  // only spots with the other type within radiusMi, judged against what the others left.
   function applyFilters(pois, flags = {}) {
+    const radius = flags.radiusMi ?? CRAWL_RADIUS_MI;
+    const now = flags.now || new Date();
     const tagged = pois.filter((p) => {
       if (p.type === 'brewery' && flags.hazyIPA && !p.tags.hazyIPA) return false;
       if (p.type === 'taco' && flags.open247 && !p.tags.open247) return false;
       if (p.type === 'taco' && flags.bajaFish && !p.tags.bajaFish) return false;
+      if (flags.openNow && isOpenAt(p.hours, now) === false) return false;
+      if (flags.near && haversineMi(flags.near, p) > flags.near.mi) return false;
       return true;
     });
     if (!flags.crawlable) return tagged;
-    return tagged.filter((p) => tagged.some((q) => q.type !== p.type && haversineMi(p, q) <= CRAWL_RADIUS_MI));
+    return tagged.filter((p) => tagged.some((q) => q.type !== p.type && haversineMi(p, q) <= radius));
+  }
+
+  // ------------------------------------------------------------------ NWS (api.weather.gov)
+  const HOUR_MS = 3600e3;
+  const NWS_SERIES = ['temperature', 'relativeHumidity', 'skyCover'];
+
+  function isoHours(dur) {
+    const m = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/.exec(dur || '');
+    if (!m) return null;
+    return (+m[1] || 0) * 24 + (+m[2] || 0) + (+m[3] || 0) / 60;
+  }
+
+  // Raw gridpoint values use "start/duration" intervals; spread them into epoch-hour slots.
+  function expandSeries(values) {
+    const out = new Map();
+    for (const v of values || []) {
+      const [start, dur] = String(v.validTime || '').split('/');
+      const t = Date.parse(start);
+      const hrs = isoHours(dur);
+      if (!Number.isFinite(t) || hrs == null || !Number.isFinite(v.value)) continue;
+      for (let i = 0; i < Math.max(1, Math.round(hrs)); i++) out.set(t + i * HOUR_MS, v.value);
+    }
+    return out;
+  }
+
+  const dayHours = (map, dayStartMs) => Array.from({ length: 24 }, (_, h) => {
+    const v = map.get(dayStartMs + h * HOUR_MS);
+    return v === undefined ? null : v;
+  });
+
+  const cToF = (c) => (c == null || !Number.isFinite(c) ? null : Math.round((c * 9 / 5 + 32) * 10) / 10);
+
+  function validateGridpoint(json) {
+    if (!json || !json.properties) throw new Error('NWS gridpoint response has no properties');
+    for (const k of NWS_SERIES) {
+      const s = json.properties[k];
+      if (!s || !Array.isArray(s.values) || s.values.length === 0) throw new Error(`NWS gridpoint is missing the ${k} series`);
+    }
+    const uom = json.properties.temperature.uom || 'wmoUnit:degC';
+    if (!/deg[CF]$/.test(uom)) throw new Error(`NWS temperature has unexpected unit ${uom}`);
+    return json;
   }
 
   // Only tags that are TRUE for a spot get shown; absent tags are never rendered.
@@ -1258,6 +1431,8 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     crawl: { nearestTacos, RADIUS_MI: CRAWL_RADIUS_MI },
     filters: { applyFilters },
     tags: { LABELS: TAG_LABELS, activeLabels },
+    hours: { isOpenAt, nextChange },
+    nws: { expandSeries, dayHours, cToF, validateGridpoint, HOUR_MS },
     // Label for where a spot is: its real address city if known, else its area.
     placeLabel: (p) => addrCity(p.addr) || (NEIGHBORHOODS.find((n) => n.id === p.hood) || {}).name || '',
     EventBus,
@@ -1342,7 +1517,31 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     el._raf = requestAnimationFrame(step);
   }
 
-  const UTIL = { esc, h, icon, paintIcons, fmtHour, hourTick, fmtMi, heatColor, tweenNumber, motion };
+  // Segmented control (radiogroup) with a sliding indicator.
+  function segHTML(name, opts, aria) {
+    return `<div class="seg" data-seg="${name}" role="radiogroup" aria-label="${esc(aria)}" style="--n:${opts.length}"><i class="seg-ind" aria-hidden="true"></i>${opts.map(([v, label]) => `<button type="button" role="radio" data-v="${esc(v)}" aria-checked="false">${esc(label)}</button>`).join('')}</div>`;
+  }
+  function setSeg(el, v) {
+    const btns = [...el.querySelectorAll('button[data-v]')];
+    const k = Math.max(0, btns.findIndex((b) => b.dataset.v === v));
+    el.style.setProperty('--k', k);
+    btns.forEach((b, i) => b.setAttribute('aria-checked', String(i === k)));
+  }
+  function bindSeg(el, cb) {
+    el.addEventListener('click', (e) => { const b = e.target.closest('button[data-v]'); if (b) cb(b.dataset.v); });
+    el.addEventListener('keydown', (e) => {
+      const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      const btns = [...el.querySelectorAll('button[data-v]')];
+      const cur = Math.max(0, btns.findIndex((b) => b.getAttribute('aria-checked') === 'true'));
+      const next = btns[(cur + d + btns.length) % btns.length];
+      next.focus();
+      cb(next.dataset.v);
+    });
+  }
+
+  const UTIL = { esc, h, icon, paintIcons, fmtHour, hourTick, fmtMi, heatColor, tweenNumber, motion, segHTML, setSeg, bindSeg };
 
   // Chart.js look shared by every module.
   Chart.defaults.font.family = 'Inter, sans-serif';
@@ -1406,6 +1605,7 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         isFocused: () => app.focusedId === def.id,
         toast: (msg) => app.toast(msg),
         flyTo: (bounds, opts) => app.flyTo(bounds, opts),
+        refreshLegend: () => app.refreshLegend(),
       };
     }
 
@@ -1720,6 +1920,8 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
   // ==================================================================
   const Microclimates = (() => {
     const C = SDX.climate;
+    const HOODS = SDX.DATA.neighborhoods;
+    const ZONES4 = ['coastal', 'central', 'inland', 'mountain'];
     const SERIES = [
       { zone: 'coastal', color: '#3987e5' },
       { zone: 'inland', color: '#d95926' },
@@ -1727,6 +1929,9 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     ];
     const ZONE_COLOR = { coastal: '#3987e5', central: '#a8a79c', inland: '#d95926', mountain: '#199e70' };
     const PLAY_HOURS_PER_MS = 16 / 20000; // 6 AM -> 10 PM in ~20 s
+    const NWS_CONCURRENCY = 4;
+    const PT_TTL = 7 * 864e5;   // point -> grid mapping barely changes
+    const GRID_TTL = 60 * 60e3; // forecast grid refreshes hourly
 
     let pins = [];          // { n, m, root, tEl, lastT, lastC }
     let fogBase = null;
@@ -1741,7 +1946,166 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     let lastFog = -1;
     let lastClock = -1;
     let lastPhase = '';
+    // Live NWS data: { byHood: Map(id -> {t, rh, sky, updated}), loading, done, total, ok, missing, updated }
+    let live = null;
+    let liveToken = 0;
 
+    const avg = (a) => a.reduce((s, v) => s + v, 0) / a.length;
+
+    // Sequential single-hue ramp for humidity (light = dry, deep blue = humid).
+    const RH_STOPS = [[0, [205, 226, 251]], [40, [134, 182, 239]], [70, [57, 135, 229]], [100, [28, 92, 171]]];
+    function rhColor(v) {
+      if (v <= 0) return `rgb(${RH_STOPS[0][1].join(',')})`;
+      for (let i = 1; i < RH_STOPS.length; i++) {
+        const [v1, c1] = RH_STOPS[i];
+        if (v <= v1) {
+          const [v0, c0] = RH_STOPS[i - 1];
+          const k = (v - v0) / (v1 - v0);
+          return `rgb(${c0.map((c, j) => Math.round(c + (c1[j] - c) * k)).join(',')})`;
+        }
+      }
+      return `rgb(${RH_STOPS[RH_STOPS.length - 1][1].join(',')})`;
+    }
+
+    // ------------------------------------------------------------ data providers
+    // Simulated model vs live NWS. Live values are never back-filled with simulated ones:
+    // an area with no live data returns null and renders as "—".
+    const isLive = (ctx) => ctx.state.source === 'live' && live && !live.loading;
+    // Live selected but not loaded yet: show placeholders, not simulated numbers under a "Live" label.
+    const pending = (ctx) => ctx.state.source === 'live' && (!live || live.loading);
+
+    function lerpSeries(arr, hour) {
+      const a = Math.floor(hour);
+      const b = Math.min(23, a + 1);
+      const va = arr[a];
+      const vb = arr[b];
+      if (va == null && vb == null) return null;
+      if (va == null) return vb;
+      if (vb == null) return va;
+      return va + (vb - va) * (hour - a);
+    }
+
+    function hoodAt(ctx, n, hour) {
+      if (pending(ctx)) return null;
+      if (!isLive(ctx)) return { t: C.tempAt(n.zone, hour, n.offset), rh: C.humidityAt(n.zone, hour) };
+      const d = live.byHood.get(n.id);
+      if (!d) return null;
+      const t = lerpSeries(d.t, hour);
+      return t == null ? null : { t, rh: lerpSeries(d.rh, hour) };
+    }
+
+    function zoneAt(ctx, zone, hour) {
+      if (pending(ctx)) return null;
+      if (!isLive(ctx)) return { t: C.tempAt(zone, hour, 0), rh: C.humidityAt(zone, hour) };
+      const vals = HOODS.filter((n) => n.zone === zone).map((n) => hoodAt(ctx, n, hour)).filter(Boolean);
+      if (!vals.length) return null;
+      const rhs = vals.map((v) => v.rh).filter((v) => v != null);
+      return { t: avg(vals.map((v) => v.t)), rh: rhs.length ? avg(rhs) : null };
+    }
+
+    const pick = (v, metric) => (v ? (metric === 'rh' ? v.rh : v.t) : null);
+    const zoneCurve = (ctx, zone, metric) => Array.from({ length: 24 }, (_, h) => pick(zoneAt(ctx, zone, h), metric));
+
+    function fogAt(ctx, hour) {
+      if (pending(ctx)) return 0;
+      if (!isLive(ctx)) return C.fogFactor(hour);
+      const sky = HOODS.filter((n) => n.zone === 'coastal')
+        .map((n) => live.byHood.get(n.id)).filter(Boolean)
+        .map((d) => lerpSeries(d.sky, hour)).filter((v) => v != null);
+      return sky.length ? clamp(avg(sky) / 100, 0, 1) : 0;
+    }
+
+    const fmtVal = (v, metric) => (v == null ? '—' : metric === 'rh' ? `${Math.round(v)}%` : `${Math.round(v)}°`);
+    const colorFor = (v, metric) => (v == null ? '#5b6474' : metric === 'rh' ? rhColor(v) : heatColor(v));
+
+    // ------------------------------------------------------------ NWS fetch (+ localStorage cache)
+    const nwsBase = () => (window.SDXDebug && window.SDXDebug.nwsBase) || 'https://api.weather.gov';
+    const cacheGet = (k, ttl) => {
+      try { const v = JSON.parse(localStorage.getItem(k)); if (v && Date.now() - v.t < ttl) return v.d; } catch { /* blocked or corrupt */ }
+      return null;
+    };
+    const cacheSet = (k, d) => { try { localStorage.setItem(k, JSON.stringify({ t: Date.now(), d })); } catch { /* quota or blocked */ } };
+
+    async function getJSON(url) {
+      const r = await fetch(url, { headers: { Accept: 'application/geo+json' } });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }
+
+    async function fetchHood(n, dayStart) {
+      const base = nwsBase();
+      const ptKey = `sdx.nws.pt.${base}.${n.id}`;
+      let gridUrl = cacheGet(ptKey, PT_TTL);
+      if (!gridUrl) {
+        const pj = await getJSON(`${base}/points/${n.lat.toFixed(4)},${n.lon.toFixed(4)}`);
+        gridUrl = pj && pj.properties && pj.properties.forecastGridData;
+        if (!gridUrl) throw new Error('no forecast grid for this point');
+        cacheSet(ptKey, gridUrl);
+      }
+      const gKey = `sdx.nws.grid.${gridUrl}`;
+      let g = cacheGet(gKey, GRID_TTL);
+      if (!g) {
+        const p = SDX.nws.validateGridpoint(await getJSON(gridUrl)).properties;
+        g = {
+          uom: p.temperature.uom || 'wmoUnit:degC', updated: p.updateTime || null,
+          t: p.temperature.values, rh: p.relativeHumidity.values, sky: p.skyCover.values,
+        };
+        cacheSet(gKey, g);
+      }
+      const N = SDX.nws;
+      const isF = /degF$/.test(g.uom);
+      const t = N.dayHours(N.expandSeries(g.t), dayStart).map((v) => (v == null ? null : isF ? v : N.cToF(v)));
+      if (t.every((v) => v == null)) throw new Error('forecast has no temperatures for today');
+      return { t, rh: N.dayHours(N.expandSeries(g.rh), dayStart), sky: N.dayHours(N.expandSeries(g.sky), dayStart), updated: g.updated };
+    }
+
+    async function loadLive(ctx) {
+      const token = ++liveToken;
+      live = { byHood: new Map(), loading: true, done: 0, total: HOODS.length, ok: 0, missing: [], updated: null };
+      ctx.map.getContainer().classList.add('mc-loading');
+      syncModeUI(ctx);
+      if (display != null) render(ctx, display, true);
+      const dayStart = new Date();
+      dayStart.setHours(0, 0, 0, 0);
+      const queue = [...HOODS];
+      const errors = [];
+      const worker = async () => {
+        while (queue.length) {
+          const n = queue.shift();
+          try {
+            const d = await fetchHood(n, dayStart.getTime());
+            if (token !== liveToken) return;
+            live.byHood.set(n.id, d);
+            live.ok++;
+            if (d.updated && (!live.updated || d.updated > live.updated)) live.updated = d.updated;
+          } catch (err) {
+            if (token !== liveToken) return;
+            errors.push(`${n.name}: ${err.message}`);
+            live.missing.push(n.name);
+          } finally {
+            if (token === liveToken) { live.done++; syncModeUI(ctx); }
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: NWS_CONCURRENCY }, worker));
+      if (token !== liveToken) return;
+      ctx.map.getContainer().classList.remove('mc-loading');
+      live.loading = false;
+      if (!live.ok) {
+        console.error('[SDX] live weather failed for every area', errors);
+        live = null;
+        ctx.toast('Live weather is unavailable right now, so showing the simulated day');
+        ctx.setState({ source: 'sim' });
+        return;
+      }
+      if (errors.length) {
+        console.warn('[SDX] live weather missing for some areas', errors);
+        ctx.toast(`No live data for ${errors.length} area${errors.length > 1 ? 's' : ''}; shown as —`);
+      }
+      refreshMode(ctx);
+    }
+
+    // ------------------------------------------------------------ drawing
     function fogRings(f, inner) {
       const off = [];
       const inl = [];
@@ -1769,73 +2133,98 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       return 'moon';
     }
 
-    function fogStatus(hr, f) {
-      if (f >= 0.98) return 'Marine layer in';
-      if (hr < 15 && f > 0.01) return 'Burning off';
-      if (f <= 0.01) return 'Clear skies';
-      return 'Rolling back in';
+    function fogStatus(ctx, hr, f) {
+      if (pending(ctx)) return 'Loading live weather…';
+      if (isLive(ctx)) return `Coastal cloud cover ${Math.round(f * 100)}% · NWS`;
+      const word = f >= 0.98 ? 'Marine layer in' : hr < 15 && f > 0.01 ? 'Burning off' : f <= 0.01 ? 'Clear skies' : 'Rolling back in';
+      return `${word} · ${Math.round(f * 100)}% coverage`;
     }
 
-    function sparkSVG(zone, offset, hour) {
+    function sparkSVG(values, hour, color) {
       const W = 220;
       const H = 46;
-      const y = (t) => H - 5 - ((t - 50) / 50) * (H - 10);
-      const pts = C.zoneCurve24(zone).map((t, i) => `${i ? 'L' : 'M'}${((i / 23) * W).toFixed(1)} ${y(t + offset).toFixed(1)}`).join('');
-      const cx = (hour / 23) * W;
-      const cy = y(C.tempAt(zone, hour, offset));
-      const col = ZONE_COLOR[zone];
+      const nums = values.filter((v) => v != null);
+      if (!nums.length) return '';
+      const lo = Math.min(...nums) - 3;
+      const hi = Math.max(...nums) + 3;
+      const y = (v) => H - 5 - ((v - lo) / (hi - lo)) * (H - 10);
+      let d = '';
+      let pen = false;
+      values.forEach((v, i) => {
+        if (v == null) { pen = false; return; }
+        d += `${pen ? 'L' : 'M'}${((i / 23) * W).toFixed(1)} ${y(v).toFixed(1)}`;
+        pen = true;
+      });
+      const cur = lerpSeries(values, hour);
+      const dot = cur == null ? '' : `<circle cx="${((hour / 23) * W).toFixed(1)}" cy="${y(cur).toFixed(1)}" r="4" fill="${color}" stroke="#0b1020" stroke-width="2"/>`;
       return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true">
         <rect class="night" x="0" y="0" width="${(6 / 23) * W}" height="${H}"/>
         <rect class="night" x="${(22 / 23) * W}" y="0" width="${W - (22 / 23) * W}" height="${H}"/>
-        <path d="${pts}" fill="none" stroke="${col}" stroke-width="2" stroke-linecap="round"/>
-        <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${col}" stroke="#0b1020" stroke-width="2"/></svg>`;
+        <path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round"/>${dot}</svg>`;
     }
 
-    function popupHTML(n, hour) {
-      const t = C.tempAt(n.zone, hour, n.offset);
-      const rh = C.humidityAt(n.zone, hour);
-      const f = C.fogFactor(hour);
-      const marine = n.zone === 'coastal' || n.zone === 'central'
-        ? (f > 0.6 ? 'thick marine layer' : f > 0.05 ? 'patchy marine layer' : 'sunny')
-        : 'no marine layer';
-      return `<div class="pp-head"><span class="badge" style="--bc:${ZONE_COLOR[n.zone]}">${esc(SDX.ZONES[n.zone].label)}</span><span class="muted mono">${fmtHour(hour)}</span></div>
-        <div class="pp-name">${esc(n.name)}</div>
-        <div class="pp-temp mono" style="color:${heatColor(t)}">${Math.round(t)}°F</div>
-        <div class="pp-stats"><span>RH <b class="mono">${Math.round(rh)}%</b></span><span>${marine}</span></div>
-        ${sparkSVG(n.zone, n.offset, hour)}
-        <div class="pp-note">Simulated late-summer day, not live weather.</div>`;
+    function popupHTML(ctx, n, hour) {
+      const v = hoodAt(ctx, n, hour);
+      const lv = isLive(ctx);
+      const head = `<div class="pp-head"><span class="badge" style="--bc:${ZONE_COLOR[n.zone]}">${esc(SDX.ZONES[n.zone].label)}</span><span class="muted mono">${fmtHour(hour)}</span></div>
+        <div class="pp-name">${esc(n.name)}</div>`;
+      if (!v) return `${head}<div class="pp-temp mono" style="color:#8a94a6">—</div><div class="pp-note">No live NWS data for this area right now.</div>`;
+      const f = fogAt(ctx, hour);
+      const sky = lv
+        ? (() => { const d = live.byHood.get(n.id); const s = d && lerpSeries(d.sky, hour); return s == null ? '' : `sky ${Math.round(s)}% cloud`; })()
+        : n.zone === 'coastal' || n.zone === 'central'
+          ? (f > 0.6 ? 'thick marine layer' : f > 0.05 ? 'patchy marine layer' : 'sunny')
+          : 'no marine layer';
+      const series = lv ? live.byHood.get(n.id).t : C.zoneCurve24(n.zone).map((t) => t + n.offset);
+      const note = lv
+        ? `NWS forecast grid${live.updated ? ` · updated ${new Date(live.updated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}`
+        : 'Simulated late-summer day, not live weather.';
+      return `${head}
+        <div class="pp-temp mono" style="color:${heatColor(v.t)}">${Math.round(v.t)}°F</div>
+        <div class="pp-stats"><span>RH <b class="mono">${v.rh == null ? '—' : Math.round(v.rh) + '%'}</b></span><span>${sky}</span></div>
+        ${sparkSVG(series, hour, ZONE_COLOR[n.zone])}
+        <div class="pp-note">${note}</div>`;
     }
 
     function placeCursor(ctx, hour) {
       const ui = ctx.ui;
       const ch = ui.chart;
       if (!ch || !ui.area) return;
+      const metric = ctx.state.metric;
       const x = ch.scales.x.getPixelForValue(hour);
       ui.cline.style.transform = `translate3d(${x.toFixed(1)}px, ${ui.area.top}px, 0)`;
       SERIES.forEach((s, i) => {
-        const t = C.tempAt(s.zone, hour, 0);
-        const yy = ch.scales.y.getPixelForValue(t);
-        ui.cdots[i].style.transform = `translate3d(${x.toFixed(1)}px, ${yy.toFixed(1)}px, 0)`;
-        const r = Math.round(t);
-        if (ui.vals[i]._r !== r) { ui.vals[i]._r = r; ui.vals[i].textContent = r + '°'; }
+        const v = pick(zoneAt(ctx, s.zone, hour), metric);
+        const dot = ui.cdots[i];
+        if (v == null) { dot.style.opacity = '0'; } else {
+          dot.style.opacity = '';
+          dot.style.transform = `translate3d(${x.toFixed(1)}px, ${ch.scales.y.getPixelForValue(v).toFixed(1)}px, 0)`;
+        }
+        const txt = fmtVal(v, metric);
+        if (ui.vals[i]._r !== txt) { ui.vals[i]._r = txt; ui.vals[i].textContent = txt; }
       });
     }
 
     // Draw everything that depends on the eased hour. Cheap: only touches DOM when values change.
     function render(ctx, hour, force = false) {
+      const metric = ctx.state.metric;
       for (const p of pins) {
-        const t = C.tempAt(p.n.zone, hour, p.n.offset);
-        const r = Math.round(t);
-        if (force || r !== p.lastT) { p.lastT = r; p.tEl.textContent = r + '°'; }
-        const ck = Math.round(t * 3);
-        if (force || ck !== p.lastC) { p.lastC = ck; p.root.style.setProperty('--c', heatColor(t)); }
+        const v = pick(hoodAt(ctx, p.n, hour), metric);
+        const txt = pending(ctx) ? '…' : fmtVal(v, metric);
+        if (force || txt !== p.lastT) { p.lastT = txt; p.tEl.textContent = txt; }
+        const ck = v == null ? 'na' : metric + Math.round(v * 3);
+        if (force || ck !== p.lastC) {
+          p.lastC = ck;
+          p.root.style.setProperty('--c', colorFor(v, metric));
+          p.root.classList.toggle('no-data', v == null && !pending(ctx));
+        }
       }
       if (openPin && (force || openPin._lastPopupMin !== Math.round(hour * 12))) {
         openPin._lastPopupMin = Math.round(hour * 12);
-        openPin.m.getPopup().setContent(popupHTML(openPin.n, hour));
+        openPin.m.getPopup().setContent(popupHTML(ctx, openPin.n, hour));
       }
 
-      const f = C.fogFactor(hour);
+      const f = fogAt(ctx, hour);
       if (fogBase && (force || Math.abs(f - lastFog) > 0.002)) {
         lastFog = f;
         fogBase.setLatLngs(fogRings(f, false));
@@ -1851,8 +2240,8 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       if (ambient) {
         const w = ambientWeights(hour);
         for (const k of Object.keys(w)) {
-          const v = w[k].toFixed(3);
-          if (ambient[k].style.opacity !== v) ambient[k].style.opacity = v;
+          const val = w[k].toFixed(3);
+          if (ambient[k].style.opacity !== val) ambient[k].style.opacity = val;
         }
       }
 
@@ -1863,7 +2252,7 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       if (ui.time) {
         const label = fmtHour(hour);
         if (ui.time.textContent !== label) { ui.time.textContent = label; ui.bubble.textContent = label; }
-        const status = `${fogStatus(hour, f)} · ${Math.round(f * 100)}% coverage`;
+        const status = fogStatus(ctx, hour, f);
         if (ui.status.textContent !== status) ui.status.textContent = status;
         const ph = phaseOf(hour);
         if (ph !== lastPhase || force) {
@@ -1874,15 +2263,13 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       if (ui.chart) placeCursor(ctx, hour);
       if (ui.tiles) {
         for (const tile of ui.tiles) {
-          const t = C.tempAt(tile.zone, hour, 0);
-          const r = Math.round(t);
-          if (force || tile.r !== r) {
-            tile.r = r;
-            tile.v.textContent = r + '°F';
-            tile.el.style.setProperty('--c', heatColor(t));
-          }
-          const rh = Math.round(C.humidityAt(tile.zone, hour));
-          if (force || tile.rh !== rh) { tile.rh = rh; tile.hEl.textContent = `RH ${rh}%`; }
+          const v = zoneAt(ctx, tile.zone, hour);
+          const main = pick(v, metric);
+          const txt = main == null ? '—' : metric === 'rh' ? `${Math.round(main)}%` : `${Math.round(main)}°F`;
+          if (force || tile.r !== txt) { tile.r = txt; tile.v.textContent = txt; tile.el.style.setProperty('--c', colorFor(main, metric)); }
+          const other = v ? (metric === 'rh' ? v.t : v.rh) : null;
+          const sub = other == null ? '—' : metric === 'rh' ? `${Math.round(other)}°F` : `RH ${Math.round(other)}%`;
+          if (force || tile.rh !== sub) { tile.rh = sub; tile.hEl.textContent = sub; }
         }
         ui.meter.style.transform = `scaleX(${f.toFixed(3)})`;
         const pct = Math.round(f * 100) + '%';
@@ -1890,12 +2277,62 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       }
     }
 
-    // Temperature pills + popups belong to Microclimates only; hide them when another layer is focused.
+    // Everything that depends on source (sim/live) or metric (temp/humidity) but not the hour.
+    function syncModeUI(ctx) {
+      const s = ctx.state;
+      const ui = ctx.ui;
+      const lv = s.source === 'live';
+      if (ui.segSrc) setSeg(ui.segSrc, s.source);
+      if (ui.segMetric) setSeg(ui.segMetric, s.metric);
+      if (ui.liveStatus) {
+        let txt = '';
+        if (lv && live && live.loading) txt = `Loading live weather ${live.done}/${live.total}…`;
+        else if (lv && live) {
+          const at = live.updated ? new Date(live.updated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+          txt = `Live · ${live.ok}/${live.total} areas${at ? ` · updated ${at}` : ''}${live.missing.length ? ` · no data: ${live.missing.slice(0, 3).join(', ')}${live.missing.length > 3 ? '…' : ''}` : ''}`;
+        }
+        ui.liveStatus.textContent = txt;
+        ui.liveStatus.hidden = !txt;
+      }
+      if (ui.fogLbl) {
+        ui.fogLbl.textContent = lv ? 'Coastal cloud layer' : 'Marine layer';
+        ui.fogSub.textContent = lv ? 'Sized by NWS sky cover along the coast' : 'Burns off after 11 AM, returns after 7 PM';
+      }
+      if (ui.tintSwitch) ui.tintSwitch.setAttribute('aria-checked', String(s.tint));
+      if (ui.fogSwitch) ui.fogSwitch.setAttribute('aria-checked', String(s.fog));
+      if (ui.chart) {
+        const rh = s.metric === 'rh';
+        ui.chartTitle.textContent = rh ? '24-hour humidity' : '24-hour temperature';
+        ui.chartSub.textContent = `by zone · ${rh ? '%' : '°F'}${isLive(ctx) ? ' · NWS' : ''}`;
+        const y = ui.chart.options.scales.y;
+        y.min = rh ? 0 : 40;
+        y.max = 100;
+        y.ticks.stepSize = rh ? 20 : 10;
+        ui.chart.data.datasets.forEach((d, i) => { d.data = zoneCurve(ctx, SERIES[i].zone, s.metric).map((v, x) => ({ x, y: v })); });
+        ui.chart.update();
+        ui.meterTitle.textContent = isLive(ctx) ? 'Coastal cloud cover (NWS)' : 'Marine layer coverage';
+        ui.meterNote.textContent = isLive(ctx)
+          ? 'Average NWS forecast sky cover over the coastal areas. The layer on the map is sized by it.'
+          : 'Coastal cloud deck pushes up Mission Valley and across the bay overnight, burns back to the beaches by early afternoon, then rolls in again after sunset.';
+        ui.note.textContent = isLive(ctx)
+          ? 'Live: National Weather Service forecast grid for today (api.weather.gov), cached for an hour. Areas without data show —; nothing is filled in.'
+          : 'Simulated model of a typical late-summer day. Temperatures and fog are illustrative, not live weather.';
+      }
+    }
+
+    function refreshMode(ctx) {
+      syncModeUI(ctx);
+      if (display != null) render(ctx, display, true);
+      ctx.refreshLegend();
+    }
+
+    // Temperature pills, popups and the tint belong to Microclimates; hide them when another layer is focused.
     function applyFocusVisibility(ctx) {
       const off = !ctx.isFocused();
       ctx.map.getContainer().classList.toggle('sdx-temps-off', off);
       for (const p of pins) { const el = p.m.getElement(); if (el) el.tabIndex = off ? -1 : 0; }
       if (off && openPin) openPin.m.closePopup();
+      if (ambient) ambient.el.classList.toggle('is-off', off || !ctx.state.tint);
     }
 
     function syncSlider(ctx) {
@@ -1928,8 +2365,8 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       icon: 'thermometer-sun',
       accent: '#38bdf8',
 
-      createState: () => ({ hour: 7.5, playing: false, fog: true }),
-      bounds: () => L.latLngBounds(SDX.DATA.neighborhoods.map((n) => [n.lat, n.lon])),
+      createState: () => ({ hour: 7.5, playing: false, fog: true, tint: true, source: 'sim', metric: 'temp' }),
+      bounds: () => L.latLngBounds(HOODS.map((n) => [n.lat, n.lon])),
 
       onActivate(ctx) {
         const map = ctx.map;
@@ -1949,10 +2386,10 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         for (const k of ['dawn', 'day', 'dusk', 'night']) { ambient[k] = h('i', { class: 'amb ' + k }); ambient.el.append(ambient[k]); }
         map.getPane('ambient').append(ambient.el);
         onMapMove = () => {
-          const s = map.getSize();
-          L.DomUtil.setPosition(ambient.el, map.containerPointToLayerPoint([-s.x / 2, -s.y / 2]));
-          ambient.el.style.width = s.x * 2 + 'px';
-          ambient.el.style.height = s.y * 2 + 'px';
+          const sz = map.getSize();
+          L.DomUtil.setPosition(ambient.el, map.containerPointToLayerPoint([-sz.x / 2, -sz.y / 2]));
+          ambient.el.style.width = sz.x * 2 + 'px';
+          ambient.el.style.height = sz.y * 2 + 'px';
         };
         map.on('move zoomend viewreset resize', onMapMove);
         onMapMove();
@@ -1961,9 +2398,7 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         onZoomTier();
 
         const center = map.getCenter();
-        const ranked = SDX.DATA.neighborhoods
-          .map((n) => ({ n, d: map.distance(center, [n.lat, n.lon]) }))
-          .sort((a, b) => a.d - b.d);
+        const ranked = HOODS.map((n) => ({ n, d: map.distance(center, [n.lat, n.lon]) })).sort((a, b) => a.d - b.d);
         pins = ranked.map(({ n }, rank) => {
           const m = L.marker([n.lat, n.lon], {
             keyboard: true, riseOnHover: true,
@@ -1974,7 +2409,7 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
           }).addTo(ctx.layer);
           m.bindPopup('', { offset: [0, -12], maxWidth: 260, minWidth: 220, autoPanPaddingTopLeft: [20, 90] });
           const el = m.getElement();
-          el.setAttribute('aria-label', `${n.name} temperature`);
+          el.setAttribute('aria-label', `${n.name} weather`);
           el.setAttribute('role', 'button');
           return { n, m, root: el.querySelector('.sdx-temp'), tEl: el.querySelector('.t'), lastT: null, lastC: null };
         });
@@ -1983,12 +2418,13 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
           if (!p) return;
           openPin = p;
           p._lastPopupMin = null;
-          p.m.getPopup().setContent(popupHTML(p.n, display));
+          p.m.getPopup().setContent(popupHTML(ctx, p.n, display));
         };
         onPopupClose = (e) => { if (openPin && openPin.m === e.popup._source) openPin = null; };
         map.on('popupopen', onPopupOpen);
         map.on('popupclose', onPopupClose);
 
+        if (ctx.state.source === 'live' && !live) loadLive(ctx);
         render(ctx, display, true);
         applyFocusVisibility(ctx);
       },
@@ -1996,10 +2432,11 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       onDeactivate(ctx) {
         const map = ctx.map;
         ctx.state.playing = false;
-        map.getContainer().classList.remove('sdx-temps-off');
+        liveToken++; // cancel any in-flight live load
+        if (live && live.loading) live = null;
+        map.getContainer().classList.remove('sdx-temps-off', 'mc-far', 'mc-loading');
         map.off('move zoomend viewreset resize', onMapMove);
         map.off('zoomend', onZoomTier);
-        map.getContainer().classList.remove('mc-far');
         map.off('popupopen', onPopupOpen);
         map.off('popupclose', onPopupClose);
         const amb = ambient;
@@ -2015,15 +2452,25 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       },
 
       onStateChange(ctx, prev) {
-        if (ctx.state.fog !== prev.fog) {
-          render(ctx, display, true);
-          const sw = ctx.ui.fogSwitch;
-          if (sw) sw.setAttribute('aria-checked', String(ctx.state.fog));
+        const s = ctx.state;
+        if (s.playing !== prev.playing) syncPlay(ctx);
+        if (s.tint !== prev.tint) { applyFocusVisibility(ctx); syncModeUI(ctx); }
+        if (s.source !== prev.source) {
+          if (s.source === 'live') {
+            const fresh = live && !live.loading && live.fetchedAt && Date.now() - live.fetchedAt < GRID_TTL;
+            if (fresh) refreshMode(ctx); else loadLive(ctx).then(() => { if (live) live.fetchedAt = Date.now(); });
+          } else {
+            liveToken++;
+            if (live && live.loading) live = null;
+            ctx.map.getContainer().classList.remove('mc-loading');
+            refreshMode(ctx);
+          }
+          return;
         }
-        if (ctx.state.playing !== prev.playing) syncPlay(ctx);
+        if (s.fog !== prev.fog || s.metric !== prev.metric) refreshMode(ctx);
       },
 
-      // Fade the marine layer out when another layer takes focus, back in on return.
+      // Fade the marine layer, pills and tint out when another layer takes focus, back in on return.
       onFocus(ctx) { if (display != null) render(ctx, display, true); applyFocusVisibility(ctx); },
       onBlur(ctx) { if (display != null) render(ctx, display, true); applyFocusVisibility(ctx); },
 
@@ -2067,12 +2514,27 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
             <input class="sdx-range" type="range" min="6" max="22" step="any" aria-label="Time of day">
             <div class="range-ticks mono"><span>6a</span><span>10a</span><span>2p</span><span>6p</span><span>10p</span></div>
           </div>
-          <div class="dock-row" style="margin-top:14px">
+          <div class="seg-row">
+            <span class="eyebrow">Data</span>
+            ${segHTML('src', [['sim', 'Simulated day'], ['live', 'Live today · NWS']], 'Weather data source')}
+          </div>
+          <div class="sub live-status mono" hidden></div>
+          <div class="seg-row">
+            <span class="eyebrow">Show</span>
+            ${segHTML('metric', [['temp', 'Temperature'], ['rh', 'Humidity']], 'Marker metric')}
+          </div>
+          <div class="dock-row" style="margin-top:12px">
             <div class="flex items-center gap-3">
-              <button type="button" class="switch" role="switch" style="--accent:#38bdf8" aria-label="Marine layer overlay"></button>
-              <div><div class="lbl">Marine layer</div><div class="sub">Burns off after 11 AM, returns after 7 PM</div></div>
+              <button type="button" class="switch sw-fog" role="switch" style="--accent:#38bdf8" aria-label="Marine layer overlay"></button>
+              <div><div class="lbl fog-lbl">Marine layer</div><div class="sub fog-sub">Burns off after 11 AM, returns after 7 PM</div></div>
             </div>
             <button type="button" class="btn now">${icon('locate-fixed')}Now</button>
+          </div>
+          <div class="dock-row" style="margin-top:10px">
+            <div class="flex items-center gap-3">
+              <button type="button" class="switch sw-tint" role="switch" style="--accent:#a78bfa" aria-label="Time-of-day tint"></button>
+              <div><div class="lbl">Time-of-day tint</div><div class="sub">Dawn and dusk color wash over the map</div></div>
+            </div>
           </div>`;
         const ui = ctx.ui;
         ui.time = el.querySelector('.time-big');
@@ -2082,8 +2544,13 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         ui.slider = el.querySelector('.sdx-range');
         ui.wrap = el.querySelector('.range-wrap');
         ui.bubble = el.querySelector('.range-bubble');
-        ui.fogSwitch = el.querySelector('.switch');
-        ui.fogSwitch.setAttribute('aria-checked', String(ctx.state.fog));
+        ui.fogSwitch = el.querySelector('.sw-fog');
+        ui.tintSwitch = el.querySelector('.sw-tint');
+        ui.fogLbl = el.querySelector('.fog-lbl');
+        ui.fogSub = el.querySelector('.fog-sub');
+        ui.liveStatus = el.querySelector('.live-status');
+        ui.segSrc = el.querySelector('.seg[data-seg="src"]');
+        ui.segMetric = el.querySelector('.seg[data-seg="metric"]');
 
         ui.play.addEventListener('click', () => {
           if (!ctx.state.playing && ctx.state.hour >= 21.99) setHour(ctx, 6);
@@ -2101,6 +2568,9 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
           if (ctx.state.playing) ctx.setState({ playing: false });
         });
         ui.fogSwitch.addEventListener('click', () => ctx.setState({ fog: !ctx.state.fog }));
+        ui.tintSwitch.addEventListener('click', () => ctx.setState({ tint: !ctx.state.tint }));
+        bindSeg(ui.segSrc, (v) => ctx.setState({ source: v }));
+        bindSeg(ui.segMetric, (v) => ctx.setState({ metric: v }));
         el.querySelector('.now').addEventListener('click', () => {
           const d = new Date();
           if (ctx.state.playing) ctx.setState({ playing: false });
@@ -2109,16 +2579,17 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
 
         syncSlider(ctx);
         syncPlay(ctx);
+        syncModeUI(ctx);
         render(ctx, display ?? ctx.state.hour, true);
       },
 
       renderSidebar(el, ctx) {
         el.innerHTML = `
           <section class="card">
-            <div class="card-h"><h3>24-hour temperature</h3><span class="muted">by zone · °F</span></div>
+            <div class="card-h"><h3 class="chart-title">24-hour temperature</h3><span class="muted chart-sub">by zone · °F</span></div>
             <div class="series-legend">${SERIES.map((s) => `<span class="it" style="--c:${s.color}"><i></i>${SDX.ZONES[s.zone].label} <b class="mono">--</b></span>`).join('')}</div>
             <div class="chart-wrap">
-              <canvas role="img" aria-label="Line chart of simulated temperature over 24 hours for coastal, inland and mountain zones"></canvas>
+              <canvas role="img" aria-label="Line chart of temperature or humidity over 24 hours for coastal, inland and mountain zones"></canvas>
               <i class="cursor-line"></i>
               ${SERIES.map((s) => `<i class="cdot" style="--c:${s.color}"></i>`).join('')}
             </div>
@@ -2126,15 +2597,15 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
           <section class="card">
             <div class="card-h"><h3>Right now</h3><span class="muted">zone averages</span></div>
             <div class="tiles">
-              ${['coastal', 'central', 'inland', 'mountain'].map((z) => `<div class="tile" data-zone="${z}"><div class="tn"><i></i>${SDX.ZONES[z].label}</div><div class="tv mono">--</div><div class="th mono">--</div></div>`).join('')}
+              ${ZONES4.map((z) => `<div class="tile" data-zone="${z}"><div class="tn"><i></i>${SDX.ZONES[z].label}</div><div class="tv mono">--</div><div class="th mono">--</div></div>`).join('')}
             </div>
           </section>
           <section class="card">
-            <div class="card-h"><h3>Marine layer coverage</h3><b class="mono meter-v">--</b></div>
+            <div class="card-h"><h3 class="meter-title">Marine layer coverage</h3><b class="mono meter-v">--</b></div>
             <div class="meter"><i></i></div>
-            <p class="sub" style="margin-top:9px">Coastal cloud deck pushes up Mission Valley and across the bay overnight, burns back to the beaches by early afternoon, then rolls in again after sunset.</p>
+            <p class="sub meter-note" style="margin-top:9px"></p>
           </section>
-          <p class="note">${icon('info')}<span>Simulated model of a typical late-summer day. Temperatures and fog are illustrative, not live weather.</span></p>`;
+          <p class="note">${icon('info')}<span class="note-text"></span></p>`;
 
         const ui = ctx.ui;
         ui.vals = [...el.querySelectorAll('.series-legend b')];
@@ -2143,6 +2614,11 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         ui.tiles = [...el.querySelectorAll('.tile')].map((t) => ({ el: t, zone: t.dataset.zone, v: t.querySelector('.tv'), hEl: t.querySelector('.th') }));
         ui.meter = el.querySelector('.meter > i');
         ui.meterV = el.querySelector('.meter-v');
+        ui.meterTitle = el.querySelector('.meter-title');
+        ui.meterNote = el.querySelector('.meter-note');
+        ui.note = el.querySelector('.note-text');
+        ui.chartTitle = el.querySelector('.chart-title');
+        ui.chartSub = el.querySelector('.chart-sub');
 
         const nightShade = {
           id: 'nightShade',
@@ -2170,14 +2646,15 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
             placeCursor(ctx, display ?? ctx.state.hour);
           },
         };
+        const rhMode = () => ctx.state.metric === 'rh';
 
         ui.chart = ctx.chart(el.querySelector('canvas'), {
           type: 'line',
           data: {
             datasets: SERIES.map((s) => ({
               label: SDX.ZONES[s.zone].label,
-              data: C.zoneCurve24(s.zone).map((y, x) => ({ x, y })),
-              borderColor: s.color, backgroundColor: s.color, borderWidth: 2,
+              data: zoneCurve(ctx, s.zone, ctx.state.metric).map((y, x) => ({ x, y })),
+              borderColor: s.color, backgroundColor: s.color, borderWidth: 2, spanGaps: false,
               pointRadius: 0, pointHoverRadius: 5, pointHoverBorderWidth: 2, pointHoverBorderColor: '#0b1020',
               tension: 0.4, cubicInterpolationMode: 'monotone',
             })),
@@ -2200,7 +2677,7 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
               },
               y: {
                 min: 40, max: 100, border: { display: false }, grid: { color: 'rgba(148,163,184,.08)' },
-                ticks: { stepSize: 10, callback: (v) => v + '°', font: { family: 'JetBrains Mono', size: 10 } },
+                ticks: { stepSize: 10, callback: (v) => v + (rhMode() ? '%' : '°'), font: { family: 'JetBrains Mono', size: 10 } },
               },
             },
             plugins: {
@@ -2209,7 +2686,7 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
                 ...TOOLTIP,
                 callbacks: {
                   title: (items) => fmtHour(items[0].parsed.x),
-                  label: (i) => ` ${i.dataset.label}  ${Math.round(i.parsed.y)}°F`,
+                  label: (i) => ` ${i.dataset.label}  ${Math.round(i.parsed.y)}${rhMode() ? '%' : '°F'}`,
                 },
               },
             },
@@ -2217,15 +2694,20 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
           plugins: [nightShade, glow, cursorSync],
         });
 
+        syncModeUI(ctx);
         render(ctx, display ?? ctx.state.hour, true);
       },
 
       legend(ctx) {
         if (!ctx.isFocused()) return '';
-        return `<div class="lg-title">Temperature</div>
-          <div class="lg-ramp"></div>
-          <div class="lg-ticks mono"><span>60°</span><span>76°</span><span>98°</span></div>
-          ${ctx.isFocused() && ctx.state.fog ? '<div class="lg-row"><i class="sw fog"></i>Marine layer</div>' : ''}`;
+        const s = ctx.state;
+        const lv = isLive(ctx);
+        const ramp = s.metric === 'rh'
+          ? `<div class="lg-title">Humidity${lv ? ' · NWS' : ''}</div><div class="lg-ramp rh"></div><div class="lg-ticks mono"><span>0%</span><span>50%</span><span>100%</span></div>`
+          : `<div class="lg-title">Temperature${lv ? ' · NWS' : ''}</div><div class="lg-ramp"></div><div class="lg-ticks mono"><span>60°</span><span>76°</span><span>98°</span></div>`;
+        const fog = s.fog ? `<div class="lg-row"><i class="sw fog"></i>${lv ? 'Coastal cloud (NWS)' : 'Marine layer'}</div>` : '';
+        const missing = lv && live && live.missing.length ? '<div class="lg-row"><i class="sw nodata"></i>— no live data</div>' : '';
+        return ramp + fog + missing;
       },
     };
   })();
@@ -2242,9 +2724,14 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       { key: 'hazyIPA', label: 'Hazy IPA Focus', hint: 'simulated', icon: 'hop' },
       { key: 'open247', label: '24/7 Taco Shops', hint: 'per OSM hours', icon: 'clock' },
       { key: 'bajaFish', label: 'Mariscos / Baja', hint: 'seafood spots', icon: 'fish' },
+      { key: 'openNow', label: 'Open Now', hint: 'posted hours', icon: 'store' },
+      { key: 'near', label: 'Near Me', hint: 'uses your location', icon: 'navigation' },
     ];
+    const NEAR_OPTS = [1, 3, 5, 10];
+    const ME = '@me';
     const BREW = '#c98500';
     const TACO = '#e5484d';
+    const HEAT_GRADIENT = { 0.2: '#5c2a06', 0.45: '#c98500', 0.7: '#f2b53a', 0.85: '#ff7a59', 1: '#e5484d' };
 
     // Markers live in a cluster group, which destroys and recreates their DOM as clusters
     // split and merge. So visual state is kept on the pin and re-applied on every 'add'.
@@ -2252,16 +2739,37 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     let cluster = null;
     let pinnedGroup = null; // crawl pins pulled out of clusters so the route is always visible
     let crawlGroup = null;
+    let meGroup = null;
+    let heat = null;
     let onMapClick = null;
+    let openTimer = null;
+    let radiusRaf = 0;
     let targets = [];
     let introUntil = 0;
+    let locating = false;
 
-    // Crawlable is O(n^2) over ~400 spots; memoize on the filters object (replaced on change).
-    let memo = { filters: null, out: [] };
+    const fmtR = (mi) => `${+mi.toFixed(2)} mi`;
+    const nearFlag = (s) => (s.filters.near && s.me ? { lat: s.me.lat, lon: s.me.lon, mi: s.nearMi } : null);
+
+    // Crawlable is O(n^2) over ~365 spots; memoize on the filters object plus everything else
+    // the result depends on (radius, your location, and the minute when Open Now is on).
+    let memo = { filters: null, key: '', out: [] };
     const visible = (ctx) => {
-      if (memo.filters !== ctx.state.filters) memo = { filters: ctx.state.filters, out: SDX.filters.applyFilters(LM, ctx.state.filters) };
+      const s = ctx.state;
+      const minute = s.filters.openNow ? Math.floor(Date.now() / 60e3) : 0;
+      const key = [s.radiusMi, s.nearMi, s.me ? `${s.me.lat},${s.me.lon}` : '', minute].join('|');
+      if (memo.filters !== s.filters || memo.key !== key) {
+        memo = {
+          filters: s.filters, key,
+          out: SDX.filters.applyFilters(LM, { ...s.filters, near: nearFlag(s), radiusMi: s.radiusMi, now: new Date() }),
+        };
+      }
       return memo.out;
     };
+
+    const originOf = (ctx, id) => (id === ME
+      ? (ctx.state.me ? { id: ME, name: 'Your location', lat: ctx.state.me.lat, lon: ctx.state.me.lon, type: 'me' } : null)
+      : byId.get(id));
 
     function paintPin(pin) {
       const host = pin.m.getElement();
@@ -2301,10 +2809,23 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     }
     const tagChips = (p) => SDX.tags.activeLabels(p).map((t) => `<span class="tag on">${t}</span>`).join('');
 
+    // "Open now · closes 11 PM" / "Closed · opens Tue 4 PM" / "Hours unknown"
+    const fmtClock = (d) => d.toLocaleTimeString([], d.getMinutes() ? { hour: 'numeric', minute: '2-digit' } : { hour: 'numeric' });
+    function hoursLine(p) {
+      const now = new Date();
+      const st = SDX.hours.nextChange(p.hours, now);
+      if (!st) return { cls: 'unk', text: 'Hours unknown' };
+      if (st.open && !st.at) return { cls: 'open', text: 'Open 24/7' };
+      if (!st.at) return { cls: st.open ? 'open' : 'closed', text: st.open ? 'Open now' : 'Closed' };
+      const other = st.at.toDateString() !== now.toDateString();
+      const when = `${other ? st.at.toLocaleDateString([], { weekday: 'short' }) + ' ' : ''}${fmtClock(st.at)}`;
+      return st.open ? { cls: 'open', text: `Open now · closes ${when}` } : { cls: 'closed', text: `Closed · opens ${when}` };
+    }
+
     function poiPopup(ctx, p) {
-      const hoodName = SDX.placeLabel(p);
       const isBrew = p.type === 'brewery';
       const tags = tagChips(p);
+      const hl = hoursLine(p);
       let foot = '';
       if (isBrew) {
         const near = SDX.crawl.nearestTacos(p, visible(ctx), { max: 1, radiusMi: 5 })[0];
@@ -2314,9 +2835,11 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
           .map((b) => ({ b, mi: SDX.geo.haversineMi(p, b) })).sort((a, b) => a.mi - b.mi)[0];
         if (brews) foot = `Nearest brewery: <b>${esc(brews.b.name)}</b> · ${fmtMi(brews.mi)} · ${SDX.geo.walkMinutes(brews.mi)} min walk`;
       }
-      return `<div class="pp-head"><span class="badge" style="--bc:${isBrew ? '#f2b53a' : '#ff7a59'}">${isBrew ? '🍺 Brewery' : '🌮 Taco shop'}</span><span class="muted">${esc(hoodName)}</span></div>
+      const you = ctx.state.me ? ` · ${fmtMi(SDX.geo.haversineMi(ctx.state.me, p))} from you` : '';
+      return `<div class="pp-head"><span class="badge" style="--bc:${isBrew ? '#f2b53a' : '#ff7a59'}">${isBrew ? '🍺 Brewery' : '🌮 Taco shop'}</span><span class="muted">${esc(SDX.placeLabel(p))}${you}</span></div>
         <div class="pp-name">${esc(p.name)}</div>
         ${p.addr ? `<div class="muted" style="margin-top:2px">${esc(p.addr)}</div>` : ''}
+        <div class="hours-line ${hl.cls}"><i></i>${esc(hl.text)}</div>
         ${p.hours && p.hours !== '24/7' ? `<div class="muted mono" style="margin-top:2px;font-size:11px">${esc(p.hours)}</div>` : ''}
         ${tags ? `<div class="tagrow">${tags}</div>` : ''}
         ${foot ? `<div class="pp-foot">${foot}</div>` : ''}
@@ -2330,19 +2853,81 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
 
     function applyVisibility(ctx) {
       const vis = new Set(visible(ctx).map((p) => p.id));
-      const hood = ctx.state.hood;
+      const s = ctx.state;
+      const now = new Date();
       const add = [];
       const remove = [];
       for (const [id, pin] of pins) {
         const show = vis.has(id);
         if (!pin.pinned && show !== pin.shown) (show ? add : remove).push(pin.m);
         pin.shown = show;
-        pin.dim = show && hood !== 'all' && pin.p.hood !== hood;
+        // Dim spots outside the chosen area, and (with Open Now on) spots whose hours are unknown.
+        pin.dim = show && ((s.hood !== 'all' && pin.p.hood !== s.hood) || (s.filters.openNow && SDX.hours.isOpenAt(pin.p.hours, now) === null));
         paintPin(pin);
       }
       if (remove.length) cluster.removeLayers(remove);
       if (add.length) cluster.addLayers(add);
+      syncHeat(ctx);
       return vis;
+    }
+
+    function syncHeat(ctx) {
+      if (!heat) return;
+      heat.setLatLngs(visible(ctx).map((p) => [p.lat, p.lon, p.type === 'brewery' ? 1 : 0.8]));
+    }
+
+    function syncView(ctx) {
+      const hm = ctx.state.view === 'heat';
+      // Created on first use: the heat canvas is only needed once you switch to Heatmap.
+      if (hm && !heat) {
+        heat = L.heatLayer([], { radius: 24, blur: 20, maxZoom: 14, minOpacity: 0.25, gradient: HEAT_GRADIENT }).addTo(ctx.layer);
+        syncHeat(ctx);
+      }
+      ctx.map.getContainer().classList.toggle('hs-heat', hm);
+      if (hm) ctx.map.closePopup();
+    }
+
+    function syncMe(ctx) {
+      if (!meGroup) return;
+      meGroup.clearLayers();
+      const s = ctx.state;
+      if (!s.me || !s.filters.near) return;
+      L.circle([s.me.lat, s.me.lon], {
+        radius: s.nearMi * 1609.34, className: 'near-ring', color: '#38bdf8', weight: 1.5,
+        dashArray: '4 6', fillColor: '#38bdf8', fillOpacity: 0.05, interactive: false,
+      }).addTo(meGroup);
+      L.marker([s.me.lat, s.me.lon], {
+        interactive: false, keyboard: false, zIndexOffset: 100000,
+        icon: L.divIcon({ className: 'sdx-icon', iconSize: [0, 0], iconAnchor: [0, 0], html: '<div class="sdx-anchor"><div class="sdx-me" title="You are here"></div></div>' }),
+      }).addTo(meGroup);
+    }
+
+    function flyToMe(ctx) {
+      const s = ctx.state;
+      if (!s.me) return;
+      ctx.flyTo(L.latLng(s.me.lat, s.me.lon).toBounds(s.nearMi * 2 * 1609.34), { maxZoom: 16, duration: 1 });
+    }
+
+    function requestLocation(ctx, onDone) {
+      if (!('geolocation' in navigator)) { ctx.toast('This browser has no location access'); onDone(false); return; }
+      locating = true;
+      syncControls(ctx);
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          locating = false;
+          const me = { lat: +pos.coords.latitude.toFixed(5), lon: +pos.coords.longitude.toFixed(5) };
+          onDone(true);
+          ctx.setState({ me, filters: { ...ctx.state.filters, near: true } });
+        },
+        (err) => {
+          locating = false;
+          const why = err.code === 1 ? 'location permission was denied' : err.code === 3 ? 'finding your location timed out' : 'your location is unavailable';
+          ctx.toast(`Near Me is off: ${why}`);
+          onDone(false);
+          syncControls(ctx);
+        },
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 5 * 60e3 },
+      );
     }
 
     function animateDraw(path, i) {
@@ -2379,7 +2964,9 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
 
     function drawCrawl(ctx, b, { fly = true } = {}) {
       clearCrawl();
-      const res = SDX.crawl.nearestTacos(b, visible(ctx), { max: 3, radiusMi: 1.5 });
+      if (!b) return;
+      const radius = ctx.state.radiusMi;
+      const res = SDX.crawl.nearestTacos(b, visible(ctx), { max: 3, radiusMi: radius });
       targets = res;
       const bp = pins.get(b.id);
       if (bp) { bp.selected = true; pinOut(bp); paintPin(bp); }
@@ -2387,8 +2974,8 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         const line = L.polyline([[b.lat, b.lon], [r.poi.lat, r.poi.lon]], {
           className: 'crawl-line', color: '#f2b53a', weight: 3, opacity: 1, interactive: false,
         }).addTo(crawlGroup);
-        // Label sits beside the taco pin (not the line midpoint) so tight clusters stay legible.
-        // ...and on the side facing away from the brewery so it never covers the start pin.
+        // Label sits beside the taco pin (not the line midpoint) so tight clusters stay legible,
+        // on the side facing away from the start so it never covers it.
         const east = r.poi.lon >= b.lon;
         L.tooltip({ permanent: true, direction: east ? 'right' : 'left', offset: [east ? 20 : -20, 0], className: 'crawl-tip', opacity: 1, interactive: false })
           .setLatLng([r.poi.lat, r.poi.lon])
@@ -2398,10 +2985,10 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         const tp = pins.get(r.poi.id);
         if (tp) { tp.target = true; tp.d = `${700 + i * 160}ms`; pinOut(tp); paintPin(tp); }
       });
-      if (!res.length) ctx.toast(`No taco shops within 1.5 mi of ${b.name} (with current filters)`);
+      if (!res.length) ctx.toast(`No taco shops within ${fmtR(radius)} of ${b.id === ME ? 'you' : b.name} (with current filters)`);
       if (fly) {
         const pts = [[b.lat, b.lon], ...res.map((r) => [r.poi.lat, r.poi.lon])];
-        // padRight leaves room for the walk-time labels drawn to the right of each taco pin.
+        // Side padding leaves room for the walk-time labels drawn beside each taco pin.
         ctx.flyTo(L.latLngBounds(pts), { maxZoom: res.length ? 17 : 15, duration: 0.9, padRight: 200, padLeft: 200 });
       }
     }
@@ -2413,6 +3000,26 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       for (const p of LM) rows.get(p.hood).all++;
       for (const p of vis) rows.get(p.hood)[p.type === 'brewery' ? 'b' : 't']++;
       return [...rows.values()].sort((a, b) => b.all - a.all || a.name.localeCompare(b.name));
+    }
+
+    // Controls whose text or state depend on radius / location / view.
+    function syncControls(ctx) {
+      const ui = ctx.ui;
+      const s = ctx.state;
+      if (ui.crawlSwitch) ui.crawlSwitch.setAttribute('aria-checked', String(s.crawl));
+      if (ui.radV) ui.radV.textContent = fmtR(s.radiusMi);
+      if (ui.radWrap) ui.radWrap.style.setProperty('--p', ((s.radiusMi - 0.5) / 2.5).toFixed(4));
+      if (ui.radSlider && document.activeElement !== ui.radSlider) ui.radSlider.value = String(s.radiusMi);
+      if (ui.crawlHint) ui.crawlHint.textContent = s.view === 'heat' ? 'Switch the view to Pins to crawl' : `Tap a 🍺 to map the 3 closest taco stops within ${fmtR(s.radiusMi)}`;
+      if (ui.hintCrawlable) ui.hintCrawlable.textContent = `pairs ≤ ${fmtR(s.radiusMi)}`;
+      if (ui.nearRow) ui.nearRow.hidden = !(s.filters.near && s.me);
+      if (ui.segNear) setSeg(ui.segNear, String(s.nearMi));
+      if (ui.segView) setSeg(ui.segView, s.view);
+      if (ui.nearChip) {
+        ui.nearChip.classList.toggle('is-loading', locating);
+        const inp = ui.nearChip.querySelector('input');
+        if (!locating) inp.checked = !!s.filters.near;
+      }
     }
 
     function updateStats(ctx) {
@@ -2447,31 +3054,59 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         row.el.classList.toggle('is-on', s.hood === r.id);
         row.el.setAttribute('aria-pressed', String(s.hood === r.id));
       }
+      renderNearCard(ctx);
       renderCrawlCard(ctx);
+    }
+
+    function renderNearCard(ctx) {
+      const card = ctx.ui.nearCard;
+      if (!card) return;
+      const s = ctx.state;
+      const on = !!(s.me && s.filters.near);
+      card.hidden = !on;
+      if (!on) return;
+      const list = visible(ctx)
+        .map((p) => ({ p, mi: SDX.geo.haversineMi(s.me, p) }))
+        .sort((a, b) => a.mi - b.mi).slice(0, 6);
+      ctx.ui.nearList.innerHTML = list.length ? list.map(({ p, mi }, i) => `
+        <button type="button" class="step" data-id="${p.id}" style="animation-delay:${i * 50}ms">
+          <span class="n mono ${p.type}">${p.type === 'brewery' ? '🍺' : '🌮'}</span>
+          <span class="min-w-0"><span class="t block truncate">${esc(p.name)}</span><span class="m">${esc(hoursLine(p).text)}</span></span>
+          <span class="w mono">${fmtMi(mi)}${mi <= 2 ? ` · ${SDX.geo.walkMinutes(mi)}m` : ''}</span>
+        </button>`).join('') : `<div class="muted">Nothing within ${s.nearMi} mi with the current filters.</div>`;
+      ctx.ui.nearList.querySelectorAll('.step').forEach((btn) => btn.addEventListener('click', () => {
+        const p = byId.get(btn.dataset.id);
+        ctx.map.flyTo([p.lat, p.lon], Math.max(ctx.map.getZoom(), 15), { duration: motion() ? 0.8 : 0 });
+        openPopup(ctx, p);
+      }));
     }
 
     function renderCrawlCard(ctx) {
       const box = ctx.ui.crawlBox;
       if (!box) return;
       const s = ctx.state;
-      if (!s.crawl) {
+      const r = fmtR(s.radiusMi);
+      if (ctx.ui.crawlHead) ctx.ui.crawlHead.textContent = `≤ ${r} on foot`;
+      if (s.view === 'heat') {
+        box.innerHTML = `<div class="crawl-hint">${icon('flame')}<span>Heatmap view shows where spots are densest. Switch the view back to Pins to plan a crawl.</span></div>`;
+      } else if (!s.crawl) {
         box.innerHTML = `<div class="crawl-hint">${icon('route')}<span>Crawl mode is off. Turn it on in the controls, then tap a 🍺 brewery.</span></div>`;
       } else if (!s.selected) {
-        box.innerHTML = `<div class="crawl-hint">${icon('footprints')}<span>Tap any 🍺 brewery on the map to draw walking routes to the 3 closest taco shops within 1.5 miles.</span></div>`;
+        box.innerHTML = `<div class="crawl-hint">${icon('footprints')}<span>Tap any 🍺 brewery on the map to draw walking routes to the 3 closest taco shops within ${r}.${s.me && s.filters.near ? ' Or start from where you are with “Start crawl here”.' : ''}</span></div>`;
       } else {
-        const b = byId.get(s.selected);
-        const total = targets.reduce((a, r) => a + r.minutes, 0);
+        const b = originOf(ctx, s.selected);
+        const total = targets.reduce((a, t) => a + t.minutes, 0);
         box.innerHTML = `
           <div class="flex items-center justify-between gap-2">
-            <div class="min-w-0"><div class="pp-name" style="font-size:14px">${esc(b.name)}</div><div class="muted">${esc(SDX.placeLabel(b))} · start here</div></div>
+            <div class="min-w-0"><div class="pp-name" style="font-size:14px">${esc(b.name)}</div><div class="muted">${b.id === ME ? 'your location' : esc(SDX.placeLabel(b))} · start here</div></div>
             <button type="button" class="btn clear">${icon('x')}Clear</button>
           </div>
-          <div class="steps">${targets.length ? targets.map((r, i) => `
-            <button type="button" class="step" data-id="${r.poi.id}" style="animation-delay:${i * 70}ms">
+          <div class="steps">${targets.length ? targets.map((t, i) => `
+            <button type="button" class="step" data-id="${t.poi.id}" style="animation-delay:${i * 70}ms">
               <span class="n mono">${i + 1}</span>
-              <span class="min-w-0"><span class="t block truncate">${esc(r.poi.name)}</span><span class="m">${SDX.tags.activeLabels(r.poi).join(' · ') || 'Taco shop'}</span></span>
-              <span class="w mono">${fmtMi(r.miles)} · ${r.minutes}m</span>
-            </button>`).join('') : '<div class="muted">No taco shops within 1.5 mi with the current filters.</div>'}
+              <span class="min-w-0"><span class="t block truncate">${esc(t.poi.name)}</span><span class="m">${SDX.tags.activeLabels(t.poi).join(' · ') || 'Taco shop'}</span></span>
+              <span class="w mono">${fmtMi(t.miles)} · ${t.minutes}m</span>
+            </button>`).join('') : `<div class="muted">No taco shops within ${r} with the current filters.</div>`}
           </div>
           ${targets.length ? `<div class="sub" style="margin-top:8px">One-way walks at ~${SDX.geo.WALK_MPH} mph with a street-grid factor · ${total} min if you visit each and return.</div>` : ''}`;
         box.querySelector('.clear').addEventListener('click', () => ctx.setState({ selected: null }));
@@ -2498,15 +3133,15 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       accent: '#f2b53a',
 
       createState: () => ({
-        filters: { crawlable: false, hazyIPA: false, open247: false, bajaFish: false },
-        crawl: true, selected: null, hood: 'all',
+        filters: { crawlable: false, hazyIPA: false, open247: false, bajaFish: false, openNow: false, near: false },
+        crawl: true, selected: null, hood: 'all', radiusMi: SDX.crawl.RADIUS_MI, nearMi: 3, me: null, view: 'pins',
       }),
       bounds: () => L.latLngBounds(LM.map((p) => [p.lat, p.lon])),
 
       onActivate(ctx) {
         const map = ctx.map;
         pins = new Map();
-        memo = { filters: null, out: [] };
+        memo = { filters: null, key: '', out: [] };
         introUntil = performance.now() + 1600;
         cluster = L.markerClusterGroup({
           maxClusterRadius: 52, disableClusteringAtZoom: 15, showCoverageOnHover: false,
@@ -2514,6 +3149,7 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         }).addTo(ctx.layer);
         pinnedGroup = L.layerGroup().addTo(ctx.layer);
         crawlGroup = L.layerGroup().addTo(ctx.layer);
+        meGroup = L.layerGroup().addTo(ctx.layer);
         const center = map.getCenter();
         const ranked = [...LM].sort((a, b) => map.distance(center, [a.lat, a.lon]) - map.distance(center, [b.lat, b.lon]));
         ranked.forEach((p, rank) => {
@@ -2528,6 +3164,7 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
           m.bindTooltip(esc(p.name), { direction: 'top', offset: [0, -20], className: 'sdx-tip' });
           m.on('add', () => paintPin(pin));
           m.on('click', () => {
+            if (ctx.state.view === 'heat') return;
             if (p.type === 'brewery' && ctx.state.crawl) { m.closeTooltip(); ctx.setState({ selected: p.id }); }
             else openPopup(ctx, p);
           });
@@ -2536,32 +3173,53 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         });
         onMapClick = () => { if (ctx.state.selected) ctx.setState({ selected: null }); };
         map.on('click', onMapClick);
+        // Open Now depends on the clock: re-check every minute while it's on.
+        openTimer = setInterval(() => {
+          if (!ctx.state.filters.openNow) return;
+          applyVisibility(ctx);
+          if (ctx.state.selected) drawCrawl(ctx, originOf(ctx, ctx.state.selected), { fly: false });
+          updateStats(ctx);
+        }, 60e3);
         applyVisibility(ctx);
-        if (ctx.state.selected) drawCrawl(ctx, byId.get(ctx.state.selected), { fly: false });
+        syncView(ctx);
+        syncMe(ctx);
+        if (ctx.state.selected) drawCrawl(ctx, originOf(ctx, ctx.state.selected), { fly: false });
       },
 
       onDeactivate(ctx) {
         ctx.map.off('click', onMapClick);
         ctx.map.closePopup();
+        ctx.map.getContainer().classList.remove('hs-heat');
+        clearInterval(openTimer);
+        cancelAnimationFrame(radiusRaf);
         pins = new Map();
-        cluster = pinnedGroup = crawlGroup = null;
+        cluster = pinnedGroup = crawlGroup = meGroup = heat = null;
         targets = [];
       },
 
       onStateChange(ctx, prev) {
         const s = ctx.state;
         if (!s.crawl && s.selected) s.selected = null;
+        if (s.view === 'heat' && s.selected) s.selected = null;
+        if (s.selected === ME && !(s.me && s.filters.near)) s.selected = null;
+        const filtersChanged = s.filters !== prev.filters || s.radiusMi !== prev.radiusMi || s.nearMi !== prev.nearMi || s.me !== prev.me;
         let vis = null;
-        if (s.filters !== prev.filters || s.hood !== prev.hood) vis = applyVisibility(ctx);
-        if (s.selected && vis && !vis.has(s.selected)) s.selected = null;
+        if (filtersChanged || s.hood !== prev.hood) vis = applyVisibility(ctx);
+        if (s.selected && s.selected !== ME && vis && !vis.has(s.selected)) s.selected = null;
         if (s.selected !== prev.selected) {
-          if (s.selected) drawCrawl(ctx, byId.get(s.selected)); else clearCrawl();
-        } else if (s.selected && s.filters !== prev.filters) {
-          drawCrawl(ctx, byId.get(s.selected), { fly: false });
+          if (s.selected) drawCrawl(ctx, originOf(ctx, s.selected)); else clearCrawl();
+        } else if (s.selected && filtersChanged) {
+          drawCrawl(ctx, originOf(ctx, s.selected), { fly: false });
         }
         if (s.hood !== prev.hood) flyToHood(ctx);
-        const sw = ctx.ui.crawlSwitch;
-        if (sw) sw.setAttribute('aria-checked', String(s.crawl));
+        const nearOn = !!(s.filters.near && s.me);
+        const wasNear = !!(prev.filters.near && prev.me);
+        if (nearOn !== wasNear || s.me !== prev.me || s.nearMi !== prev.nearMi) {
+          syncMe(ctx);
+          if (nearOn) flyToMe(ctx);
+        }
+        if (s.view !== prev.view) syncView(ctx);
+        syncControls(ctx);
         updateStats(ctx);
       },
 
@@ -2573,30 +3231,76 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
             <span class="muted"><b class="mono vis-count" style="color:var(--text)">${visible(ctx).length}</b> / ${LM.length} spots</span>
           </div>
           <div class="fchips">${FILTERS.map((f) => `
-            <label class="fchip">
+            <label class="fchip" data-chip="${f.key}">
               <input type="checkbox" data-key="${f.key}" ${s.filters[f.key] ? 'checked' : ''}>
-              ${icon(f.icon)}<span>${f.label}<small>${f.hint}</small></span><span class="check" aria-hidden="true"></span>
+              ${icon(f.icon)}<span>${f.label}<small data-hint="${f.key}">${f.hint}</small></span><span class="check" aria-hidden="true"></span>
             </label>`).join('')}
           </div>
-          <div class="dock-row" style="margin-top:14px">
+          <div class="seg-row near-row" hidden>
+            <span class="eyebrow">Within</span>
+            ${segHTML('near', NEAR_OPTS.map((m) => [String(m), `${m} mi`]), 'Distance from you')}
+          </div>
+          <div class="rad-block">
+            <div class="dock-row"><span class="eyebrow">Walk radius</span><b class="mono rad-v">--</b></div>
+            <div class="range-wrap amber" style="margin-top:6px">
+              <input class="sdx-range amber" type="range" min="0.5" max="3" step="0.25" aria-label="Walk radius in miles">
+              <div class="range-ticks mono"><span>0.5</span><span>1</span><span>1.5</span><span>2</span><span>2.5</span><span>3 mi</span></div>
+            </div>
+          </div>
+          <div class="seg-row">
+            <span class="eyebrow">View</span>
+            ${segHTML('view', [['pins', 'Pins'], ['heat', 'Heatmap']], 'Map view')}
+          </div>
+          <div class="dock-row" style="margin-top:12px">
             <div class="flex items-center gap-3">
               <button type="button" class="switch" role="switch" style="--accent:#f2b53a" aria-label="Taco and beer crawl mode"></button>
-              <div><div class="lbl">Taco &amp; beer crawl</div><div class="sub">Tap a 🍺 to map the 3 closest taco stops within 1.5 mi</div></div>
+              <div><div class="lbl">Taco &amp; beer crawl</div><div class="sub crawl-hint-txt"></div></div>
             </div>
           </div>`;
-        ctx.ui.visCount = el.querySelector('.vis-count');
-        ctx.ui.visCount._v = visible(ctx).length;
-        ctx.ui.crawlSwitch = el.querySelector('.switch');
-        ctx.ui.crawlSwitch.setAttribute('aria-checked', String(s.crawl));
-        ctx.ui.crawlSwitch.addEventListener('click', () => ctx.setState({ crawl: !ctx.state.crawl }));
+        const ui = ctx.ui;
+        ui.visCount = el.querySelector('.vis-count');
+        ui.visCount._v = visible(ctx).length;
+        ui.crawlSwitch = el.querySelector('.switch');
+        ui.crawlHint = el.querySelector('.crawl-hint-txt');
+        ui.hintCrawlable = el.querySelector('[data-hint="crawlable"]');
+        ui.nearRow = el.querySelector('.near-row');
+        ui.nearChip = el.querySelector('[data-chip="near"]');
+        ui.segNear = el.querySelector('.seg[data-seg="near"]');
+        ui.segView = el.querySelector('.seg[data-seg="view"]');
+        ui.radSlider = el.querySelector('.sdx-range.amber');
+        ui.radWrap = el.querySelector('.range-wrap.amber');
+        ui.radV = el.querySelector('.rad-v');
+
+        ui.crawlSwitch.addEventListener('click', () => ctx.setState({ crawl: !ctx.state.crawl }));
         el.querySelectorAll('input[data-key]').forEach((inp) => inp.addEventListener('change', () => {
-          ctx.setState({ filters: { ...ctx.state.filters, [inp.dataset.key]: inp.checked } });
+          const key = inp.dataset.key;
+          if (key === 'near' && inp.checked && !ctx.state.me) {
+            // Only turn the filter on once we actually have a position.
+            requestLocation(ctx, (ok) => { if (!ok) inp.checked = false; });
+            return;
+          }
+          ctx.setState({ filters: { ...ctx.state.filters, [key]: inp.checked } });
         }));
+        // Walk radius: coalesce slider input to one state update per frame (Crawlable is O(n^2)).
+        ui.radSlider.addEventListener('input', () => {
+          const v = Number(ui.radSlider.value);
+          ui.radV.textContent = fmtR(v);
+          ui.radWrap.style.setProperty('--p', ((v - 0.5) / 2.5).toFixed(4));
+          cancelAnimationFrame(radiusRaf);
+          radiusRaf = requestAnimationFrame(() => ctx.setState({ radiusMi: v }));
+        });
+        bindSeg(ui.segNear, (v) => ctx.setState({ nearMi: Number(v) }));
+        bindSeg(ui.segView, (v) => ctx.setState({ view: v }));
+        syncControls(ctx);
       },
 
       renderSidebar(el, ctx) {
         const rows = hoodCounts(ctx);
         el.innerHTML = `
+          <section class="card near-card" hidden>
+            <div class="card-h"><h3>Nearest to you</h3><button type="button" class="btn start-here">${icon('footprints')}Start crawl here</button></div>
+            <div class="steps near-list" style="margin-top:0"></div>
+          </section>
           <section class="card">
             <div class="card-h">
               <h3>Brewery vs taco mix</h3>
@@ -2625,10 +3329,10 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
             </div>
           </section>
           <section class="card">
-            <div class="card-h"><h3>Crawl route</h3><span class="muted">≤ 1.5 mi on foot</span></div>
+            <div class="card-h"><h3>Crawl route</h3><span class="muted crawl-head">≤ 1.5 mi on foot</span></div>
             <div class="crawl-box"></div>
           </section>
-          <p class="note">${icon('info')}<span>Breweries and taco shops across San Diego County from OpenStreetMap (ODbL), national chains left out. 24/7 and seafood come from OSM tags where mapped, Crawlable from real distances; Hazy IPA is simulated. Refresh with <code>node scripts/fetch-pois.mjs</code>, so check before you go.</span></p>`;
+          <p class="note">${icon('info')}<span>Breweries and taco shops across San Diego County from OpenStreetMap (ODbL), national chains left out. Hours, 24/7 and seafood come from OSM where mapped (Open Now dims spots with unknown hours rather than hiding them); Crawlable and Near Me use real distances; Hazy IPA is simulated. Your location stays in this browser. Check before you go.</span></p>`;
 
         const ui = ctx.ui;
         ui.sel = el.querySelector('.sel');
@@ -2640,6 +3344,14 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         ui.bPct = el.querySelector('.bp');
         ui.tPct = el.querySelector('.tp');
         ui.crawlBox = el.querySelector('.crawl-box');
+        ui.crawlHead = el.querySelector('.crawl-head');
+        ui.nearCard = el.querySelector('.near-card');
+        ui.nearList = el.querySelector('.near-list');
+        el.querySelector('.start-here').addEventListener('click', () => {
+          if (ctx.state.view === 'heat') ctx.setState({ view: 'pins' });
+          if (!ctx.state.crawl) ctx.setState({ crawl: true });
+          ctx.setState({ selected: ME });
+        });
         ui.rows = new Map([...el.querySelectorAll('.hrow')].map((row) => {
           row.addEventListener('click', () => ctx.setState({ hood: ctx.state.hood === row.dataset.id ? 'all' : row.dataset.id }));
           return [row.dataset.id, { el: row, bEl: row.querySelector('.b'), tEl: row.querySelector('.t'), ct: row.querySelector('.ct') }];
@@ -2668,12 +3380,17 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         updateStats(ctx);
       },
 
-      legend() {
-        return `<div class="lg-title">Hotspots</div>
-          <div class="lg-row"><i class="sw brew"></i>Craft brewery</div>
+      legend(ctx) {
+        const s = ctx.state;
+        const rows = s.view === 'heat'
+          ? '<div class="lg-ramp heat"></div><div class="lg-ticks mono"><span>fewer</span><span>denser</span></div>'
+          : `<div class="lg-row"><i class="sw brew"></i>Craft brewery</div>
           <div class="lg-row"><i class="sw taco"></i>Taco shop</div>
           <div class="lg-row"><i class="sw clu"></i>Cluster · ring = 🍺/🌮 split</div>
-          <div class="lg-row"><i class="sw line"></i>Crawl walk (≤ 1.5 mi)</div>`;
+          <div class="lg-row"><i class="sw line"></i>Crawl walk (≤ ${fmtR(s.radiusMi)})</div>`;
+        const extra = (s.filters.openNow ? '<div class="lg-row"><i class="sw dimmed"></i>Dimmed = hours unknown</div>' : '')
+          + (s.filters.near && s.me ? `<div class="lg-row"><i class="sw you"></i>You · ${s.nearMi} mi ring</div>` : '');
+        return `<div class="lg-title">${s.view === 'heat' ? 'Spot density' : 'Hotspots'}</div>${rows}${extra}`;
       },
     };
   })();
