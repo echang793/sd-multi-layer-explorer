@@ -503,6 +503,14 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
 .crawl-hint { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; color: var(--text-2); line-height: 1.45; }
 .crawl-hint svg { width: 18px; height: 18px; flex: none; color: var(--brew-hi); margin-top: 1px; }
 
+/* Follow-the-real-clock indicator */
+.now-pill { display: inline-flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 11px; color: #86efac; }
+.now-pill[hidden] { display: none; }
+.now-pill i { width: 7px; height: 7px; border-radius: 50%; background: #0ca30c; box-shadow: 0 0 8px #0ca30c; animation: sdx-breathe 2s ease-in-out infinite; }
+.now-pill b { font-weight: 600; }
+.btn.now.is-on { color: #86efac; border-color: rgba(12,163,12,.5); background: rgba(12,163,12,.1); }
+.tz-tag { font-size: 10px; padding: 2px 5px; border-radius: 5px; color: var(--text-2); background: rgba(255,255,255,.06); border: 1px solid var(--hair); }
+
 /* Segmented controls */
 .seg-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
 .seg { --n: 2; --k: 0; position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 3px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--hair); min-width: 210px; }
@@ -1233,6 +1241,36 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       .map((r) => ({ ...r, minutes: walkMinutes(r.miles) }));
   }
 
+  // ------------------------------------------------------------------ San Diego time
+  // Everything time-of-day (clock, "today", opening hours) is San Diego wall-clock time,
+  // whatever timezone the viewing device is set to.
+  const SD_TZ = 'America/Los_Angeles';
+  const sdFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: SD_TZ, hourCycle: 'h23', weekday: 'short',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const WEEKDAY = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+  function sdParts(date = new Date()) {
+    const o = {};
+    for (const part of sdFmt.formatToParts(date)) o[part.type] = part.value;
+    return { y: +o.year, m: +o.month, d: +o.day, hour: +o.hour % 24, minute: +o.minute, second: +o.second, weekday: WEEKDAY[o.weekday] };
+  }
+  function sdOffsetMs(date) {
+    const p = sdParts(date);
+    return Date.UTC(p.y, p.m - 1, p.d, p.hour, p.minute, p.second) - Math.floor(date.getTime() / 1000) * 1000;
+  }
+  // Pacific wall-clock -> instant (two passes settle the offset across DST changes).
+  function fromPacific(y, m, d, hh = 0, mm = 0) {
+    const guess = Date.UTC(y, m - 1, d, hh, mm);
+    let t = guess - sdOffsetMs(new Date(guess));
+    t = guess - sdOffsetMs(new Date(t));
+    return new Date(t);
+  }
+  const sdHour = (date = new Date()) => { const p = sdParts(date); return p.hour + p.minute / 60; };
+  const sdDayStartMs = (date = new Date()) => { const p = sdParts(date); return fromPacific(p.y, p.m, p.d).getTime(); };
+  const sdDayKey = (date = new Date()) => { const p = sdParts(date); return `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`; };
+
   // ------------------------------------------------------------------ opening hours
   // A small OSM opening_hours reader for the formats in our data: 24/7, off/closed, day
   // ranges/lists, several spans per day, spans past midnight, later rules overriding earlier.
@@ -1294,8 +1332,9 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
     const h = parseHours(str);
     if (!h) return null;
     if (h.always) return true;
-    const d = date.getDay();
-    const min = date.getHours() * 60 + date.getMinutes();
+    const t = sdParts(date);
+    const d = t.weekday;
+    const min = t.hour * 60 + t.minute;
     if ((h.week[d] || []).some(([a, b]) => min >= a && min < b)) return true;
     return (h.week[(d + 6) % 7] || []).some(([, b]) => b > 1440 && min + 1440 < b);
   }
@@ -1432,6 +1471,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
     filters: { applyFilters },
     tags: { LABELS: TAG_LABELS, activeLabels },
     hours: { isOpenAt, nextChange },
+    time: { TZ: SD_TZ, parts: sdParts, fromPacific, hour: sdHour, dayStartMs: sdDayStartMs, dayKey: sdDayKey },
     nws: { expandSeries, dayHours, cToF, validateGridpoint, HOUR_MS },
     // Label for where a spot is: its real address city if known, else its area.
     placeLabel: (p) => addrCity(p.addr) || (NEIGHBORHOODS.find((n) => n.id === p.hood) || {}).name || '',
@@ -1482,6 +1522,10 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
     const M = mins % 60;
     return `${H % 12 === 0 ? 12 : H % 12}:${String(M).padStart(2, '0')} ${H < 12 ? 'AM' : 'PM'}`;
   }
+  // Clock text in San Diego time, whatever the device timezone is.
+  const TZ_OPTS = { timeZone: SDX.time.TZ };
+  const fmtClockPT = (d) => d.toLocaleTimeString([], { ...TZ_OPTS, hour: 'numeric', ...(SDX.time.parts(d).minute ? { minute: '2-digit' } : {}) });
+  const deviceIsPacific = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone === SDX.time.TZ; } catch { return true; } })();
   const hourTick = (v) => (v === 0 ? '12a' : v === 12 ? '12p' : v < 12 ? v + 'a' : v - 12 + 'p');
   const fmtMi = (mi) => (mi < 0.1 ? '<0.1' : mi.toFixed(1)) + ' mi';
 
@@ -1932,6 +1976,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
     const NWS_CONCURRENCY = 4;
     const PT_TTL = 7 * 864e5;   // point -> grid mapping barely changes
     const GRID_TTL = 60 * 60e3; // forecast grid refreshes hourly
+    const REFRESH_RETRY_MS = 10 * 60e3;
 
     let pins = [];          // { n, m, root, tEl, lastT, lastC }
     let fogBase = null;
@@ -1949,6 +1994,9 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
     // Live NWS data: { byHood: Map(id -> {t, rh, sky, updated}), loading, done, total, ok, missing, updated }
     let live = null;
     let liveToken = 0;
+    let lastNowCheck = 0;
+    let refreshTimer = null;
+    let onVisible = null;
 
     const avg = (a) => a.reduce((s, v) => s + v, 0) / a.length;
 
@@ -2059,45 +2107,76 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       return { t, rh: N.dayHours(N.expandSeries(g.rh), dayStart), sky: N.dayHours(N.expandSeries(g.sky), dayStart), updated: g.updated };
     }
 
-    async function loadLive(ctx) {
+    const fmtUpdated = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { ...TZ_OPTS, hour: 'numeric', minute: '2-digit' }) : '');
+
+    // Test hook (console only): pretend the live data is an hour old to exercise the refresh.
+    window.SDXDebugLive = {
+      expire: () => { if (live) live.fetchedAt = 0; },
+      info: () => (live ? { ok: live.ok, loading: live.loading, refreshing: !!live.refreshing, dayKey: live.dayKey, fetchedAt: live.fetchedAt, retryAt: live.retryAt || 0 } : null),
+      staleDay: () => { if (live) live.dayKey = '1999-01-01'; },
+    };
+
+    // Hourly (and at San Diego midnight) pull a fresh forecast in the background.
+    function maybeRefreshLive(ctx) {
+      if (ctx.state.source !== 'live' || !live || live.loading || live.refreshing) return;
+      if (Date.now() < (live.retryAt || 0)) return; // backing off after a failed refresh
+      const stale = Date.now() - live.fetchedAt >= GRID_TTL || live.dayKey !== SDX.time.dayKey();
+      if (stale) loadLive(ctx, { background: true });
+    }
+
+    // background: keep showing the current data while a fresh copy loads (hourly refresh).
+    async function loadLive(ctx, { background = false } = {}) {
       const token = ++liveToken;
-      live = { byHood: new Map(), loading: true, done: 0, total: HOODS.length, ok: 0, missing: [], updated: null };
-      ctx.map.getContainer().classList.add('mc-loading');
+      const next = { byHood: new Map(), loading: true, done: 0, total: HOODS.length, ok: 0, missing: [], updated: null, dayKey: SDX.time.dayKey(), fetchedAt: 0 };
+      if (background && live) live.refreshing = true;
+      else {
+        live = next;
+        ctx.map.getContainer().classList.add('mc-loading');
+        if (display != null) render(ctx, display, true);
+      }
       syncModeUI(ctx);
-      if (display != null) render(ctx, display, true);
-      const dayStart = new Date();
-      dayStart.setHours(0, 0, 0, 0);
+      const dayStart = SDX.time.dayStartMs();
       const queue = [...HOODS];
       const errors = [];
       const worker = async () => {
         while (queue.length) {
           const n = queue.shift();
           try {
-            const d = await fetchHood(n, dayStart.getTime());
+            const d = await fetchHood(n, dayStart);
             if (token !== liveToken) return;
-            live.byHood.set(n.id, d);
-            live.ok++;
-            if (d.updated && (!live.updated || d.updated > live.updated)) live.updated = d.updated;
+            next.byHood.set(n.id, d);
+            next.ok++;
+            if (d.updated && (!next.updated || d.updated > next.updated)) next.updated = d.updated;
           } catch (err) {
             if (token !== liveToken) return;
             errors.push(`${n.name}: ${err.message}`);
-            live.missing.push(n.name);
+            next.missing.push(n.name);
           } finally {
-            if (token === liveToken) { live.done++; syncModeUI(ctx); }
+            if (token === liveToken) { next.done++; syncModeUI(ctx); }
           }
         }
       };
       await Promise.all(Array.from({ length: NWS_CONCURRENCY }, worker));
       if (token !== liveToken) return;
       ctx.map.getContainer().classList.remove('mc-loading');
-      live.loading = false;
-      if (!live.ok) {
+      next.loading = false;
+      if (!next.ok) {
         console.error('[SDX] live weather failed for every area', errors);
+        if (background && live && live !== next) {
+          // Keep the older live data on screen, but say it's stale.
+          live.refreshing = false;
+          live.retryAt = Date.now() + REFRESH_RETRY_MS; // back off instead of retrying (and toasting) every minute
+          ctx.toast(`Couldn't refresh live weather; still showing the ${fmtUpdated(live.updated) || 'earlier'} forecast`);
+          syncModeUI(ctx);
+          return;
+        }
         live = null;
         ctx.toast('Live weather is unavailable right now, so showing the simulated day');
         ctx.setState({ source: 'sim' });
         return;
       }
+      next.fetchedAt = Date.now();
+      live = next;
       if (errors.length) {
         console.warn('[SDX] live weather missing for some areas', errors);
         ctx.toast(`No live data for ${errors.length} area${errors.length > 1 ? 's' : ''}; shown as —`);
@@ -2177,7 +2256,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
           : 'no marine layer';
       const series = lv ? live.byHood.get(n.id).t : C.zoneCurve24(n.zone).map((t) => t + n.offset);
       const note = lv
-        ? `NWS forecast grid${live.updated ? ` · updated ${new Date(live.updated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}`
+        ? `NWS forecast grid${live.updated ? ` · updated ${fmtUpdated(live.updated)}` : ''}`
         : 'Simulated late-summer day, not live weather.';
       return `${head}
         <div class="pp-temp mono" style="color:${heatColor(v.t)}">${Math.round(v.t)}°F</div>
@@ -2288,8 +2367,8 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
         let txt = '';
         if (lv && live && live.loading) txt = `Loading live weather ${live.done}/${live.total}…`;
         else if (lv && live) {
-          const at = live.updated ? new Date(live.updated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
-          txt = `Live · ${live.ok}/${live.total} areas${at ? ` · updated ${at}` : ''}${live.missing.length ? ` · no data: ${live.missing.slice(0, 3).join(', ')}${live.missing.length > 3 ? '…' : ''}` : ''}`;
+          const at = fmtUpdated(live.updated);
+          txt = `Live · ${live.ok}/${live.total} areas${at ? ` · updated ${at}` : ''}${live.refreshing ? ' · refreshing…' : ''}${live.missing.length ? ` · no data: ${live.missing.slice(0, 3).join(', ')}${live.missing.length > 3 ? '…' : ''}` : ''}`;
         }
         ui.liveStatus.textContent = txt;
         ui.liveStatus.hidden = !txt;
@@ -2343,6 +2422,18 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       ui.wrap.style.setProperty('--p', ((hr - 6) / 16).toFixed(4));
     }
 
+    // "Live now" pill + Now button state while the clock follows real San Diego time.
+    function syncFollow(ctx) {
+      const ui = ctx.ui;
+      if (!ui.nowPill) return;
+      const s = ctx.state;
+      const real = SDX.time.hour();
+      ui.nowPill.hidden = !s.follow;
+      ui.nowPill.querySelector('b').textContent = real < 6 ? 'Live · before 6 AM' : real > 22 ? 'Live · after 10 PM' : 'Live now';
+      ui.nowBtn.classList.toggle('is-on', s.follow);
+      ui.nowBtn.setAttribute('aria-pressed', String(s.follow));
+    }
+
     function syncPlay(ctx) {
       const b = ctx.ui.play;
       if (!b) return;
@@ -2365,7 +2456,8 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       icon: 'thermometer-sun',
       accent: '#38bdf8',
 
-      createState: () => ({ hour: 7.5, playing: false, fog: true, tint: true, source: 'sim', metric: 'temp' }),
+      // Opens at the current San Diego time and follows the real clock until you scrub.
+      createState: () => ({ hour: clamp(SDX.time.hour(), 6, 22), follow: true, playing: false, fog: true, tint: true, source: 'sim', metric: 'temp' }),
       bounds: () => L.latLngBounds(HOODS.map((n) => [n.lat, n.lon])),
 
       onActivate(ctx) {
@@ -2425,6 +2517,9 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
         map.on('popupclose', onPopupClose);
 
         if (ctx.state.source === 'live' && !live) loadLive(ctx);
+        refreshTimer = setInterval(() => maybeRefreshLive(ctx), 60e3);
+        onVisible = () => { if (document.visibilityState === 'visible') { lastNowCheck = 0; maybeRefreshLive(ctx); } };
+        document.addEventListener('visibilitychange', onVisible);
         render(ctx, display, true);
         applyFocusVisibility(ctx);
       },
@@ -2434,6 +2529,9 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
         ctx.state.playing = false;
         liveToken++; // cancel any in-flight live load
         if (live && live.loading) live = null;
+        if (live) live.refreshing = false;
+        clearInterval(refreshTimer);
+        document.removeEventListener('visibilitychange', onVisible);
         map.getContainer().classList.remove('sdx-temps-off', 'mc-far', 'mc-loading');
         map.off('move zoomend viewreset resize', onMapMove);
         map.off('zoomend', onZoomTier);
@@ -2455,10 +2553,11 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
         const s = ctx.state;
         if (s.playing !== prev.playing) syncPlay(ctx);
         if (s.tint !== prev.tint) { applyFocusVisibility(ctx); syncModeUI(ctx); }
+        if (s.follow !== prev.follow) { syncFollow(ctx); if (s.follow) lastNowCheck = 0; }
         if (s.source !== prev.source) {
           if (s.source === 'live') {
-            const fresh = live && !live.loading && live.fetchedAt && Date.now() - live.fetchedAt < GRID_TTL;
-            if (fresh) refreshMode(ctx); else loadLive(ctx).then(() => { if (live) live.fetchedAt = Date.now(); });
+            const fresh = live && !live.loading && Date.now() - live.fetchedAt < GRID_TTL && live.dayKey === SDX.time.dayKey();
+            if (fresh) refreshMode(ctx); else loadLive(ctx);
           } else {
             liveToken++;
             if (live && live.loading) live = null;
@@ -2474,8 +2573,15 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       onFocus(ctx) { if (display != null) render(ctx, display, true); applyFocusVisibility(ctx); },
       onBlur(ctx) { if (display != null) render(ctx, display, true); applyFocusVisibility(ctx); },
 
-      onFrame(ctx, dt) {
+      onFrame(ctx, dt, t) {
         const s = ctx.state;
+        // Following the real clock: re-read San Diego time about once a second.
+        if (s.follow && !s.playing && t - lastNowCheck > 1000) {
+          lastNowCheck = t;
+          const target = clamp(SDX.time.hour(), 6, 22);
+          if (Math.abs(target - s.hour) > 1 / 240) setHour(ctx, target);
+          syncFollow(ctx);
+        }
         if (s.playing) {
           let next = s.hour + dt * PLAY_HOURS_PER_MS;
           if (next >= 22) { next = 22; s.playing = false; syncPlay(ctx); }
@@ -2501,8 +2607,9 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
                 <span class="p-moon" data-phase="moon">${icon('moon')}</span>
               </div>
               <div>
-                <div class="time-big mono" aria-live="off">--</div>
+                <div class="flex items-center gap-2"><div class="time-big mono" aria-live="off">--</div>${deviceIsPacific ? '' : '<span class="tz-tag mono">PT</span>'}</div>
                 <div class="time-sub">--</div>
+                <div class="now-pill" hidden><i></i><b>Live now</b></div>
               </div>
             </div>
             <button type="button" class="play">
@@ -2528,7 +2635,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
               <button type="button" class="switch sw-fog" role="switch" style="--accent:#38bdf8" aria-label="Marine layer overlay"></button>
               <div><div class="lbl fog-lbl">Marine layer</div><div class="sub fog-sub">Burns off after 11 AM, returns after 7 PM</div></div>
             </div>
-            <button type="button" class="btn now">${icon('locate-fixed')}Now</button>
+            <button type="button" class="btn now" aria-pressed="false" title="Jump to the current San Diego time and keep following it">${icon('locate-fixed')}Now</button>
           </div>
           <div class="dock-row" style="margin-top:10px">
             <div class="flex items-center gap-3">
@@ -2551,13 +2658,18 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
         ui.liveStatus = el.querySelector('.live-status');
         ui.segSrc = el.querySelector('.seg[data-seg="src"]');
         ui.segMetric = el.querySelector('.seg[data-seg="metric"]');
+        ui.nowPill = el.querySelector('.now-pill');
+        ui.nowBtn = el.querySelector('.now');
+        // Any manual time change stops following the real clock; Now resumes it.
+        const stopFollow = () => { if (ctx.state.follow) ctx.setState({ follow: false }); };
 
         ui.play.addEventListener('click', () => {
+          stopFollow();
           if (!ctx.state.playing && ctx.state.hour >= 21.99) setHour(ctx, 6);
           ctx.setState({ playing: !ctx.state.playing });
         });
-        ui.slider.addEventListener('pointerdown', () => { if (ctx.state.playing) ctx.setState({ playing: false }); });
-        ui.slider.addEventListener('input', () => setHour(ctx, Math.round(Number(ui.slider.value) * 4) / 4));
+        ui.slider.addEventListener('pointerdown', () => { stopFollow(); if (ctx.state.playing) ctx.setState({ playing: false }); });
+        ui.slider.addEventListener('input', () => { stopFollow(); setHour(ctx, Math.round(Number(ui.slider.value) * 4) / 4); });
         ui.slider.addEventListener('keydown', (e) => {
           const steps = { ArrowLeft: -0.25, ArrowDown: -0.25, ArrowRight: 0.25, ArrowUp: 0.25, PageDown: -1, PageUp: 1 };
           if (e.key in steps) setHour(ctx, Math.round((ctx.state.hour + steps[e.key]) * 4) / 4);
@@ -2565,20 +2677,22 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
           else if (e.key === 'End') setHour(ctx, 22);
           else return;
           e.preventDefault();
+          stopFollow();
           if (ctx.state.playing) ctx.setState({ playing: false });
         });
         ui.fogSwitch.addEventListener('click', () => ctx.setState({ fog: !ctx.state.fog }));
         ui.tintSwitch.addEventListener('click', () => ctx.setState({ tint: !ctx.state.tint }));
         bindSeg(ui.segSrc, (v) => ctx.setState({ source: v }));
         bindSeg(ui.segMetric, (v) => ctx.setState({ metric: v }));
-        el.querySelector('.now').addEventListener('click', () => {
-          const d = new Date();
+        ui.nowBtn.addEventListener('click', () => {
           if (ctx.state.playing) ctx.setState({ playing: false });
-          setHour(ctx, d.getHours() + d.getMinutes() / 60);
+          setHour(ctx, SDX.time.hour());
+          ctx.setState({ follow: true });
         });
 
         syncSlider(ctx);
         syncPlay(ctx);
+        syncFollow(ctx);
         syncModeUI(ctx);
         render(ctx, display ?? ctx.state.hour, true);
       },
@@ -2810,15 +2924,14 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
     const tagChips = (p) => SDX.tags.activeLabels(p).map((t) => `<span class="tag on">${t}</span>`).join('');
 
     // "Open now · closes 11 PM" / "Closed · opens Tue 4 PM" / "Hours unknown"
-    const fmtClock = (d) => d.toLocaleTimeString([], d.getMinutes() ? { hour: 'numeric', minute: '2-digit' } : { hour: 'numeric' });
     function hoursLine(p) {
       const now = new Date();
       const st = SDX.hours.nextChange(p.hours, now);
       if (!st) return { cls: 'unk', text: 'Hours unknown' };
       if (st.open && !st.at) return { cls: 'open', text: 'Open 24/7' };
       if (!st.at) return { cls: st.open ? 'open' : 'closed', text: st.open ? 'Open now' : 'Closed' };
-      const other = st.at.toDateString() !== now.toDateString();
-      const when = `${other ? st.at.toLocaleDateString([], { weekday: 'short' }) + ' ' : ''}${fmtClock(st.at)}`;
+      const other = SDX.time.dayKey(st.at) !== SDX.time.dayKey(now);
+      const when = `${other ? st.at.toLocaleDateString([], { ...TZ_OPTS, weekday: 'short' }) + ' ' : ''}${fmtClockPT(st.at)}`;
       return st.open ? { cls: 'open', text: `Open now · closes ${when}` } : { cls: 'closed', text: `Closed · opens ${when}` };
     }
 

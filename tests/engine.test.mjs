@@ -397,8 +397,9 @@ test('registry: global LayerRegistry singleton is exposed', () => {
 });
 
 // ---------------------------------------------------------------- opening hours
-// Local-time dates: 2026-09-28 is a Monday.
-const at = (y, m, d, hh, mm = 0) => new Date(y, m - 1, d, hh, mm);
+// San Diego (Pacific) wall-clock dates, independent of the machine's timezone.
+// 2026-09-28 is a Monday.
+const at = (y, m, d, hh, mm = 0) => SDX.time.fromPacific(y, m, d, hh, mm);
 const MON = (hh, mm) => at(2026, 9, 28, hh, mm);
 const TUE = (hh, mm) => at(2026, 9, 29, hh, mm);
 const FRI = (hh, mm) => at(2026, 10, 2, hh, mm);
@@ -445,12 +446,44 @@ test('hours: nextChange reports when a spot closes or opens', () => {
   const h = 'Mo-Th 16:00-23:00; Fr-Sa 12:00-23:00; Su 12:00-22:00';
   const a = nextChange(h, MON(17));
   assert.equal(a.open, true);
-  assert.equal(a.at.getHours(), 23);
+  assert.equal(SDX.time.parts(a.at).hour, 23);
   const b = nextChange(h, MON(12));
   assert.equal(b.open, false);
-  assert.equal(b.at.getHours(), 16);
+  assert.equal(SDX.time.parts(b.at).hour, 16);
   assert.equal(nextChange('24/7', MON(12)).at, null, '24/7 never changes');
   assert.equal(nextChange('by appointment', MON(12)), null);
+});
+
+// ---------------------------------------------------------------- San Diego time
+test('time: Pacific wall clock converts both ways, across DST', () => {
+  const T = SDX.time;
+  const summer = T.fromPacific(2026, 7, 1, 9, 0);   // PDT, UTC-7
+  const winter = T.fromPacific(2026, 12, 15, 9, 0); // PST, UTC-8
+  assert.equal(summer.getUTCHours(), 16);
+  assert.equal(winter.getUTCHours(), 17);
+  const p = T.parts(T.fromPacific(2026, 9, 28, 17, 45));
+  assert.deepEqual([p.y, p.m, p.d, p.hour, p.minute, p.weekday], [2026, 9, 28, 17, 45, 1]);
+  assert.equal(T.hour(T.fromPacific(2026, 9, 28, 15, 30)), 15.5);
+  assert.equal(T.dayStartMs(T.fromPacific(2026, 9, 28, 15)), T.fromPacific(2026, 9, 28, 0).getTime());
+  assert.equal(T.dayKey(T.fromPacific(2026, 9, 28, 23, 59)), '2026-09-28');
+  assert.equal(T.dayKey(T.fromPacific(2026, 9, 29, 0, 1)), '2026-09-29');
+});
+
+test('time: hours and "today" stay on San Diego time when the device is elsewhere', () => {
+  // Regression: Open Now used the device timezone, so a laptop set to another zone
+  // judged San Diego shop hours against the wrong clock.
+  const prev = process.env.TZ;
+  try {
+    process.env.TZ = 'Asia/Tokyo';
+    const T = SDX.time;
+    const mon5pm = T.fromPacific(2026, 9, 28, 17, 0);
+    assert.equal(SDX.hours.isOpenAt('Mo-Th 16:00-23:00', mon5pm), true);
+    assert.equal(SDX.hours.isOpenAt('Mo-Th 16:00-23:00', T.fromPacific(2026, 9, 28, 15, 0)), false);
+    assert.equal(T.hour(mon5pm), 17);
+    assert.equal(T.dayKey(mon5pm), '2026-09-28');
+  } finally {
+    if (prev === undefined) delete process.env.TZ; else process.env.TZ = prev;
+  }
 });
 
 // ---------------------------------------------------------------- new filters

@@ -54,6 +54,16 @@ node scripts/fetch-pois.mjs          # add --dry-run to only report counts
   - An area whose fetch fails shows "—" and is never filled with simulated numbers. If every fetch fails, the app shows a toast and falls back to `sim`.
   - In live mode the fog shape is driven by coastal sky cover. To test failures, set `window.SDXDebug = { nwsBase: 'bad url' }`.
 - Microclimates `state.metric` is `temp` or `rh`.
+- All time-of-day logic uses San Diego time through `SDX.time`, never the device clock or timezone:
+  - `fromPacific`, `parts`, `hour`, `dayStartMs`, `dayKey`.
+  - This covers the clock, "today" for NWS, Open Now and popup hours.
+  - Tests build dates with `SDX.time.fromPacific`, and one test runs under `TZ=Asia/Tokyo`.
+- Microclimates `state.follow` (default true) keeps the clock on real San Diego time, re-read about once a second. Dragging the slider, arrow keys or Play turn it off; Now turns it back on.
+- Live NWS refreshes in the background while live mode is on:
+  - It checks every minute and when the tab becomes visible.
+  - It refetches when the data is an hour old or the San Diego day has changed.
+  - The old data stays on screen until the new data arrives. A failed refresh keeps the old data and shows a toast.
+  - `window.SDXDebugLive.expire()` forces a refresh for testing.
 - Tacos & Brews `state` also has:
   - `radiusMi`: the walk radius, driving Crawlable and crawl routes.
   - `me` / `nearMi`: Near Me. Location comes from browser geolocation, which needs localhost or https.
