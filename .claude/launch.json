@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sd-explorer",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8105", "--bind", "127.0.0.1", "-d", "src"],
+      "port": 8105
+    }
+  ]
+}

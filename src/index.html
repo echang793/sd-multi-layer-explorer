@@ -1,0 +1,2793 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SD Multi-Layer Explorer</title>
+<meta name="description" content="San Diego microclimates, marine layer and taco & brewery crawls on one extensible map.">
+<meta name="theme-color" content="#070b14">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b1020'/%3E%3Cpath d='M16 6 5 12l11 6 11-6-11-6Zm-11 11 11 6 11-6M5 22l11 6 11-6' fill='none' stroke='%2338bdf8' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: { fontFamily: {
+      sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+    } } },
+  };
+</script>
+
+<style>
+/* =====================================================================
+   DESIGN TOKENS
+   ===================================================================== */
+:root {
+  color-scheme: dark;
+  --bg: #070b14;
+  --panel-a: rgba(20, 28, 46, 0.80);
+  --panel-b: rgba(10, 15, 27, 0.74);
+  --card: rgba(255, 255, 255, 0.028);
+  --hair: rgba(148, 163, 184, 0.13);
+  --hair-strong: rgba(148, 163, 184, 0.24);
+  --text: #e6edf7;
+  --text-2: #a8b4c6;
+  --text-3: #6f7f96;
+
+  --marine: #38bdf8;
+  --marine-soft: #7cc8f2;
+  --brew: #c98500;       /* validated dark-surface step (dataviz) */
+  --brew-hi: #f2b53a;
+  --taco: #e5484d;
+  --taco-hi: #ff7a59;
+  --s-coastal: #3987e5;  /* categorical slots 1-3, validated all-pairs on dark */
+  --s-inland: #d95926;
+  --s-mountain: #199e70;
+  --s-central: #a8a79c;
+
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+  --r-lg: 18px;
+  --r-md: 14px;
+  --shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 18px 40px -18px rgba(0,0,0,.75), 0 2px 8px rgba(0,0,0,.35);
+  --sb-w: 380px;
+}
+
+html, body { height: 100%; background: var(--bg); color: var(--text); }
+body { margin: 0; overflow: hidden; font-family: Inter, ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.tnum { font-variant-numeric: tabular-nums; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+:focus-visible { outline: 2px solid var(--marine); outline-offset: 2px; }
+
+/* =====================================================================
+   SURFACES
+   ===================================================================== */
+.sdx-glass {
+  background: linear-gradient(180deg, var(--panel-a), var(--panel-b));
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--hair);
+  box-shadow: var(--shadow);
+  border-radius: var(--r-lg);
+}
+.card { background: var(--card); border: 1px solid var(--hair); border-radius: var(--r-md); padding: 14px; }
+.card + .card { margin-top: 12px; }
+.card-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.card-h h3 { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
+.eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+.muted { color: var(--text-3); font-size: 12px; }
+.note { margin-top: 12px; font-size: 11.5px; line-height: 1.5; color: var(--text-3); display: flex; gap: 8px; }
+.note svg { flex: none; width: 14px; height: 14px; margin-top: 2px; }
+
+/* =====================================================================
+   MAP
+   ===================================================================== */
+#map { position: fixed; inset: 0; background: #0b0f17; animation: sdx-fade 1.1s ease both; }
+#map::after { /* vignette */
+  content: ""; position: absolute; inset: 0; z-index: 401; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(3,6,12,.55) 100%);
+}
+.leaflet-container { font-family: Inter, sans-serif; background: #0b0f17; outline: none; }
+.leaflet-container img.leaflet-tile, .leaflet-container img { max-width: none !important; max-height: none !important; }
+.leaflet-top { top: 76px; }
+.leaflet-right, .leaflet-bottom.leaflet-right { transition: transform .55s var(--ease-out); }
+@media (min-width: 900px) { body.sb-open .leaflet-right { transform: translateX(calc(-1 * var(--sb-w) - 16px)); } }
+.leaflet-bar { border: 1px solid var(--hair) !important; border-radius: 12px !important; overflow: hidden; box-shadow: var(--shadow) !important; }
+.leaflet-bar a, .leaflet-bar a:hover {
+  width: 36px !important; height: 36px !important; line-height: 36px !important; font-size: 17px !important;
+  background: rgba(13,19,33,.82); color: var(--text); border-bottom: 1px solid var(--hair) !important;
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); transition: background .2s;
+}
+.leaflet-bar a:hover { background: rgba(30,41,64,.92); }
+.leaflet-control-attribution {
+  background: rgba(9,13,24,.6) !important; color: var(--text-3) !important; font-size: 10px !important;
+  border-top-left-radius: 8px; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.leaflet-control-attribution a { color: var(--text-2) !important; }
+
+/* Popups */
+.leaflet-popup-content-wrapper {
+  background: rgba(12,18,32,.94); color: var(--text); border: 1px solid var(--hair-strong);
+  border-radius: 14px; box-shadow: 0 24px 48px -16px rgba(0,0,0,.8);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  animation: sdx-pop-card .32s var(--ease-out);
+  transform-origin: 50% 100%;
+}
+.leaflet-popup-tip { background: rgba(12,18,32,.94); border: 1px solid var(--hair-strong); box-shadow: none; }
+.leaflet-popup-content { margin: 12px 14px 12px; font-size: 13px; line-height: 1.4; min-width: 200px; }
+.leaflet-container a.leaflet-popup-close-button { color: var(--text-3); top: 6px; right: 6px; font-size: 18px; }
+.leaflet-container a.leaflet-popup-close-button:hover { color: var(--text); }
+
+/* Tooltips */
+.leaflet-tooltip.sdx-tip {
+  background: rgba(9,13,24,.92); color: var(--text); border: 1px solid var(--hair-strong);
+  border-radius: 8px; padding: 4px 8px; font-size: 12px; font-weight: 500; box-shadow: 0 8px 20px -8px rgba(0,0,0,.8);
+}
+.leaflet-tooltip.sdx-tip.leaflet-tooltip-top::before { border-top-color: rgba(9,13,24,.92); }
+.leaflet-tooltip.crawl-tip { background: transparent; border: 0; box-shadow: none; padding: 0; }
+.leaflet-tooltip.crawl-tip::before { display: none; }
+.crawl-tip .ct {
+  display: inline-block; white-space: nowrap; padding: 4px 9px; border-radius: 999px;
+  background: rgba(9,13,24,.92); border: 1px solid rgba(242,181,58,.45); color: #fde7b0;
+  font: 500 11px/1.2 "JetBrains Mono", monospace; box-shadow: 0 6px 18px -6px rgba(242,181,58,.45);
+  animation: sdx-rise .5s var(--ease-out) backwards; animation-delay: calc(.55s + var(--d, 0) * .14s);
+}
+.crawl-tip .ct b { color: #fff; font-weight: 600; }
+.crawl-tip .ci { display: inline-grid; place-items: center; width: 15px; height: 15px; margin-right: 6px; border-radius: 50%; font-style: normal; font-size: 9.5px; color: #1a1203; background: var(--brew-hi); vertical-align: -2px; }
+
+/* Marker anchors: Leaflet positions .sdx-icon; we center the child and animate the grandchild */
+.sdx-icon { background: none; border: 0; }
+.sdx-anchor { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); }
+
+/* Temperature pills (module 1) */
+.sdx-temp {
+  --c: #c3c2b7;
+  display: flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer;
+  padding: 5px 10px 5px 7px; border-radius: 999px;
+  background: rgba(9,13,24,.80);
+  border: 1px solid color-mix(in srgb, var(--c) 55%, transparent);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35), 0 8px 22px -8px color-mix(in srgb, var(--c) 85%, transparent);
+  color: #fff; font: 600 12px/1 "JetBrains Mono", monospace; font-variant-numeric: tabular-nums;
+  transform-origin: 50% 100%;
+  animation: sdx-pop .6s var(--ease-spring) backwards; animation-delay: calc(var(--i, 0) * 22ms + 120ms);
+  transition: transform .35s var(--ease-out), opacity .35s var(--ease-out), box-shadow .25s;
+}
+.sdx-temps-off .sdx-temp { opacity: 0; transform: scale(.4); pointer-events: none; }
+.sdx-temp .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); flex: none; }
+.sdx-temp .nm {
+  font: 500 11.5px/1 Inter, sans-serif; color: var(--text-2); max-width: 0; opacity: 0; overflow: hidden;
+  transition: max-width .35s var(--ease-out), opacity .25s, margin .35s var(--ease-out); margin-left: -6px;
+}
+.sdx-icon:hover .sdx-temp, .sdx-icon:focus-visible .sdx-temp { transform: translateY(-3px) scale(1.07); }
+.sdx-icon:hover .sdx-temp .nm, .zoom-near .sdx-temp .nm, .sdx-icon:focus-visible .sdx-temp .nm { max-width: 140px; opacity: 1; margin-left: 0; }
+
+/* POI pins (module 2) */
+.sdx-pin {
+  --base: var(--brew); --hi: var(--brew-hi);
+  position: relative; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+  background: radial-gradient(circle at 32% 26%, var(--hi), var(--base) 72%);
+  border: 2px solid rgba(255,255,255,.22);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--base) 22%, transparent), 0 10px 22px -8px color-mix(in srgb, var(--base) 90%, transparent);
+  animation: sdx-pop .6s var(--ease-spring) backwards; animation-delay: calc(var(--i, 0) * 20ms + 150ms);
+  transition: transform .4s var(--ease-out), opacity .4s var(--ease-out), filter .4s;
+}
+.sdx-pin.taco { --base: var(--taco); --hi: var(--taco-hi); }
+.sdx-pin .glyph { font-size: 16px; line-height: 1; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
+.sdx-icon:hover .sdx-pin { transform: translateY(-3px) scale(1.12); }
+.sdx-pin.is-hidden { opacity: 0; transform: scale(.25); pointer-events: none; }
+.sdx-pin.is-dim { opacity: .28; filter: saturate(.35); }
+.sdx-pin::after, .sdx-pin::before {
+  content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid var(--hi); opacity: 0; pointer-events: none;
+}
+.sdx-pin.is-selected { transform: scale(1.18); }
+.sdx-pin.is-selected::after { animation: sdx-ring 1.8s var(--ease-out) infinite; }
+.sdx-pin.is-selected::before { opacity: .9; inset: -4px; }
+.sdx-pin.is-target::after { animation: sdx-ring 1.6s var(--ease-out) infinite; animation-delay: var(--d, 0ms); }
+
+/* Clusters: ring shows the brewery (amber) vs taco (red) split inside */
+.sdx-cluster {
+  --pb: 50%; --s: 44px;
+  width: var(--s); height: var(--s); border-radius: 50%; padding: 3px; cursor: pointer; display: grid;
+  background: conic-gradient(var(--brew-hi) 0 var(--pb), var(--taco) var(--pb) 100%);
+  box-shadow: 0 0 0 4px rgba(242,181,58,.10), 0 10px 26px -8px rgba(229,72,77,.7);
+  animation: sdx-pop .5s var(--ease-spring) backwards; transition: transform .3s var(--ease-out);
+}
+.sdx-cluster b { display: grid; place-items: center; border-radius: 50%; background: rgba(9,13,24,.9); color: #fff; font-size: 12.5px; font-weight: 600; }
+.sdx-icon:hover .sdx-cluster { transform: scale(1.1); }
+.sw.clu { background: conic-gradient(var(--brew-hi) 0 45%, var(--taco) 45% 100%); }
+.sdx-leave .sdx-cluster,
+.sdx-leave .sdx-temp, .sdx-leave .sdx-pin { animation: sdx-pop-out .3s var(--ease-in-out) forwards !important; }
+path.sdx-leave { transition: opacity .3s; opacity: 0 !important; }
+
+/* Crawl lines */
+path.crawl-line { stroke-linecap: round; filter: drop-shadow(0 0 6px rgba(242,181,58,.55)); }
+path.crawl-line.ants { stroke-dasharray: 2 9; animation: sdx-ants 1.1s linear infinite; }
+
+/* Marine layer panes: geometry repaints only when the fog factor changes;
+   drift + breathing are compositor-only transforms/opacity on the panes. */
+.leaflet-fog-pane, .leaflet-fogtex-pane { pointer-events: none; will-change: transform; }
+.leaflet-fog-pane { filter: blur(14px); animation: sdx-fog-a 17s ease-in-out infinite alternate; }
+.leaflet-fogtex-pane { filter: blur(6px); animation: sdx-fog-b 23s ease-in-out infinite alternate, sdx-breathe 7s ease-in-out infinite; }
+.leaflet-fog-pane svg, .leaflet-fogtex-pane svg { transition: opacity .6s var(--ease-out); }
+
+/* Time-of-day ambience: sits between tiles (200) and overlays (400) */
+.leaflet-ambient-pane { pointer-events: none; }
+.sdx-ambient { position: absolute; left: 0; top: 0; mix-blend-mode: soft-light; transition: opacity .6s; }
+.sdx-ambient .amb { position: absolute; inset: 0; opacity: 0; }
+.sdx-ambient .dawn  { background: linear-gradient(180deg, rgba(255,176,128,.55), rgba(255,140,170,.22) 60%, rgba(120,170,255,.2)); }
+.sdx-ambient .day   { background: radial-gradient(ellipse at 55% 25%, rgba(220,238,255,.55), rgba(160,200,255,.18) 70%); }
+.sdx-ambient .dusk  { background: linear-gradient(0deg, rgba(255,120,60,.8), rgba(170,90,210,.6) 55%, rgba(80,60,170,.55)); }
+.sdx-ambient .night { background: linear-gradient(180deg, rgba(20,30,110,.9), rgba(40,40,140,.75)); }
+.sdx-ambient.is-off { opacity: 0; }
+
+/* =====================================================================
+   SHELL: top bar, chips, sidebar, dock, legend, toast
+   ===================================================================== */
+#topbar {
+  position: fixed; top: 12px; left: 12px; right: 12px; z-index: 1100;
+  display: flex; align-items: center; gap: 14px; padding: 8px 10px 8px 10px; border-radius: 18px;
+  animation: sdx-drop .8s var(--ease-out) .1s backwards;
+}
+.logo {
+  width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; flex: none;
+  background: conic-gradient(from 200deg, #38bdf8, #f2b53a, #e5484d, #199e70, #38bdf8);
+  box-shadow: 0 0 22px -4px rgba(56,189,248,.55), inset 0 0 0 1px rgba(255,255,255,.2);
+  position: relative;
+}
+.logo::after { content: ""; position: absolute; inset: 2px; border-radius: 10px; background: rgba(9,13,24,.82); }
+.logo svg { position: relative; z-index: 1; width: 19px; height: 19px; color: #fff; }
+.brand { flex: 1 1 0; min-width: 0; }
+.brand h1 { overflow: hidden; text-overflow: ellipsis; }
+.brand p { overflow: hidden; text-overflow: ellipsis; }
+@media (min-width: 900px) { .brand { flex: 0 1 auto; } }
+.tiles-osm-dark { filter: invert(100%) hue-rotate(180deg) brightness(92%) contrast(88%) saturate(30%); }
+.bm-pop { position: absolute; right: 0; top: calc(100% + 10px); width: 300px; padding: 14px; z-index: 5; animation: sdx-rise .35s var(--ease-out); }
+.bm-pop[hidden] { display: none; }
+.bm-form { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.inp { flex: 1; min-width: 0; font-size: 12px; padding: 7px 10px; border-radius: 9px; color: var(--text); background: rgba(255,255,255,.05); border: 1px solid var(--hair); }
+.inp:focus { outline: none; border-color: var(--marine); box-shadow: 0 0 0 3px rgba(56,189,248,.18); }
+.link { font-size: 12px; color: var(--marine-soft); }
+.link:hover { text-decoration: underline; }
+#bm-toggle { position: relative; }
+.key-dot { position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--brew-hi); box-shadow: 0 0 8px var(--brew-hi); opacity: 0; transform: scale(0); transition: opacity .3s, transform .4s var(--ease-spring); }
+body.needs-key .key-dot { opacity: 1; transform: none; }
+.brand h1 { font-size: 15px; font-weight: 650; letter-spacing: -0.015em; line-height: 1.15; white-space: nowrap; }
+.brand p { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+
+.chips { position: relative; display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.03); border: 1px solid var(--hair); overflow-x: auto; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip {
+  position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 8px; flex: none;
+  padding: 7px 13px 7px 11px; border-radius: 999px; font-size: 13px; font-weight: 500; color: var(--text-3);
+  transition: color .3s, background .3s; animation: sdx-rise .5s var(--ease-out) backwards;
+}
+.chip svg { width: 16px; height: 16px; }
+.chip:hover { color: var(--text-2); }
+.chip.is-active { color: var(--text-2); }
+.chip.is-focused { color: var(--text); }
+.chip .led { width: 6px; height: 6px; border-radius: 50%; background: rgba(148,163,184,.35); transition: background .3s, box-shadow .3s, transform .3s var(--ease-spring); }
+.chip.is-active .led { background: var(--accent); box-shadow: 0 0 10px var(--accent); transform: scale(1.25); }
+.chip-ind {
+  position: absolute; left: 0; top: 4px; bottom: 4px; width: 0; border-radius: 999px; z-index: 0; opacity: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.05));
+  border: 1px solid var(--hair-strong);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 26px -6px var(--ind-accent, transparent);
+  transition: transform .5s var(--ease-out), width .5s var(--ease-out), opacity .3s, box-shadow .5s;
+}
+
+.btn-icon {
+  width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; color: var(--text-2);
+  transition: background .2s, color .2s, transform .2s var(--ease-out);
+}
+.btn-icon:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.btn-icon:active { transform: scale(.94); }
+.btn-icon svg { width: 18px; height: 18px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 11px; border-radius: 10px; font-size: 12.5px; font-weight: 500;
+  color: var(--text-2); background: rgba(255,255,255,.04); border: 1px solid var(--hair); transition: background .2s, color .2s, transform .2s var(--ease-out);
+}
+.btn:hover { background: rgba(255,255,255,.08); color: var(--text); }
+.btn:active { transform: scale(.96); }
+.btn svg { width: 14px; height: 14px; }
+
+/* Sidebar */
+#sidebar {
+  position: fixed; z-index: 1050; top: 80px; right: 12px; bottom: 12px; width: var(--sb-w);
+  display: flex; flex-direction: column; overflow: hidden;
+  transform: translateX(calc(100% + 24px)); opacity: .0;
+  transition: transform .6s var(--ease-out), opacity .45s var(--ease-out);
+}
+body.sb-open #sidebar { transform: none; opacity: 1; }
+.sb-head { display: flex; align-items: center; gap: 12px; padding: 14px 12px 12px 16px; border-bottom: 1px solid var(--hair); }
+.sb-badge { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; flex: none; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 20px -6px var(--accent); }
+.sb-badge svg { width: 18px; height: 18px; }
+.sb-title { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.sb-desc { font-size: 11.5px; color: var(--text-3); }
+.sb-body { flex: 1; overflow-y: auto; padding: 14px; scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.2) transparent; }
+.sb-body, #dock-body { transition: opacity .17s ease, transform .17s ease; }
+.sb-body.is-out, #dock-body.is-out { opacity: 0; transform: translateY(6px); }
+.enter > * { animation: sdx-rise .5s var(--ease-out) backwards; }
+.enter > *:nth-child(2) { animation-delay: .06s; }
+.enter > *:nth-child(3) { animation-delay: .12s; }
+.enter > *:nth-child(4) { animation-delay: .18s; }
+.enter > *:nth-child(n+5) { animation-delay: .24s; }
+
+/* Dock */
+#dock {
+  position: fixed; z-index: 1040; left: 12px; bottom: 12px; width: 404px; max-height: calc(100vh - 104px); overflow-y: auto;
+  padding: 14px; animation: sdx-slide-up .8s var(--ease-out) .3s backwards; scrollbar-width: none;
+}
+.dock-tabs { display: flex; gap: 4px; padding: 4px; margin-bottom: 12px; border-radius: 12px; background: rgba(255,255,255,.03); border: 1px solid var(--hair); }
+.dock-tabs[hidden] { display: none; }
+.dtab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 8px; border-radius: 9px; font-size: 12px; font-weight: 500; color: var(--text-3); transition: background .3s, color .3s; }
+.dtab { min-width: 0; }
+.dtab span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dtab svg { width: 14px; height: 14px; flex: none; }
+.dtab.is-on { background: rgba(255,255,255,.08); color: var(--text); box-shadow: inset 0 0 0 1px var(--hair-strong), 0 0 18px -8px var(--accent); }
+.dock-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dock-row + .dock-row { margin-top: 12px; }
+.empty { text-align: center; padding: 18px 8px; color: var(--text-3); font-size: 13px; }
+.empty svg { width: 22px; height: 22px; margin: 0 auto 8px; color: var(--text-2); }
+
+/* Time block */
+.time-block { display: flex; align-items: center; gap: 12px; }
+.phase { position: relative; width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,.04); border: 1px solid var(--hair); }
+.phase > span { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transform: scale(.6) rotate(-30deg); transition: opacity .45s var(--ease-out), transform .6s var(--ease-spring); }
+.phase > span.on { opacity: 1; transform: none; }
+.phase svg { width: 20px; height: 20px; }
+.phase .p-sunrise { color: #fdba74; } .phase .p-sun { color: #fde047; } .phase .p-sunset { color: #fb923c; } .phase .p-moon { color: #a5b4fc; }
+.time-big { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
+.time-sub { font-size: 12px; color: var(--text-3); margin-top: 5px; }
+.play {
+  width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; color: #06121f; flex: none; position: relative;
+  background: radial-gradient(circle at 35% 30%, #bae6fd, #38bdf8 70%);
+  box-shadow: 0 0 0 4px rgba(56,189,248,.14), 0 10px 26px -8px rgba(56,189,248,.8);
+  transition: transform .25s var(--ease-spring), box-shadow .3s;
+}
+.play:hover { transform: scale(1.06); }
+.play:active { transform: scale(.94); }
+.play > span { position: absolute; inset: 0; display: grid; place-items: center; transition: opacity .25s, transform .35s var(--ease-spring); }
+.play > span[aria-hidden="true"] { opacity: 0; transform: scale(.5); }
+.play svg { width: 19px; height: 19px; fill: currentColor; }
+.play.is-playing { box-shadow: 0 0 0 6px rgba(56,189,248,.18), 0 0 30px -4px rgba(56,189,248,.9); }
+
+/* Range slider */
+.range-wrap { --p: 0; position: relative; margin-top: 26px; padding-top: 4px; }
+.range-bubble {
+  position: absolute; top: -26px; left: calc(var(--p) * (100% - 22px) + 11px); transform: translateX(-50%);
+  padding: 3px 8px; border-radius: 7px; font-size: 11px; color: #06121f; background: #e0f2fe; white-space: nowrap;
+  box-shadow: 0 6px 16px -6px rgba(56,189,248,.8); pointer-events: none;
+}
+.range-bubble::after { content: ""; position: absolute; left: 50%; bottom: -4px; width: 8px; height: 8px; background: #e0f2fe; transform: translateX(-50%) rotate(45deg); border-radius: 1px; }
+.sdx-range { -webkit-appearance: none; appearance: none; width: 100%; height: 26px; background: transparent; cursor: pointer; display: block; }
+.sdx-range::-webkit-slider-runnable-track {
+  height: 7px; border-radius: 999px;
+  background: linear-gradient(90deg, #fca5a5 0%, #fdba74 10%, #7dd3fc 32%, #bae6fd 50%, #7dd3fc 66%, #fb923c 80%, #a78bfa 90%, #3730a3 100%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.08), 0 0 18px -6px rgba(125,211,252,.5);
+}
+.sdx-range::-moz-range-track { height: 7px; border-radius: 999px; background: linear-gradient(90deg, #fca5a5 0%, #fdba74 10%, #7dd3fc 32%, #bae6fd 50%, #7dd3fc 66%, #fb923c 80%, #a78bfa 90%, #3730a3 100%); }
+.sdx-range::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 22px; height: 22px; margin-top: -7.5px; border-radius: 50%; background: #fff; border: 0;
+  box-shadow: 0 0 0 5px rgba(255,255,255,.14), 0 0 20px rgba(255,255,255,.65), 0 4px 10px rgba(0,0,0,.4);
+  transition: transform .2s var(--ease-spring), box-shadow .2s;
+}
+.sdx-range::-moz-range-thumb { width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 0 0 5px rgba(255,255,255,.14), 0 0 20px rgba(255,255,255,.65); }
+.sdx-range:active::-webkit-slider-thumb { transform: scale(1.15); box-shadow: 0 0 0 8px rgba(255,255,255,.12), 0 0 26px rgba(255,255,255,.8); }
+.sdx-range.plain::-webkit-slider-runnable-track { background: linear-gradient(90deg, #164e63, #22d3ee); }
+.sdx-range.plain::-moz-range-track { background: linear-gradient(90deg, #164e63, #22d3ee); }
+.range-ticks { display: flex; justify-content: space-between; margin-top: 4px; padding: 0 3px; font-size: 10px; color: var(--text-3); }
+
+/* Switch */
+.switch { position: relative; width: 40px; height: 23px; border-radius: 999px; background: rgba(148,163,184,.25); flex: none; transition: background .3s, box-shadow .3s; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 17px; height: 17px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.4); transition: transform .4s var(--ease-spring); }
+.switch[aria-checked="true"] { background: var(--accent, var(--marine)); box-shadow: 0 0 16px -4px var(--accent, var(--marine)); }
+.switch[aria-checked="true"]::after { transform: translateX(17px); }
+.lbl { font-size: 13px; font-weight: 500; }
+.sub { font-size: 11.5px; color: var(--text-3); margin-top: 2px; line-height: 1.35; }
+
+/* Filter chips */
+.fchips { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fchip {
+  position: relative; display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 11px; cursor: pointer; user-select: none;
+  background: rgba(255,255,255,.03); border: 1px solid var(--hair); font-size: 12.5px; font-weight: 500; color: var(--text-2);
+  transition: background .25s, border-color .25s, color .25s, transform .2s var(--ease-out);
+}
+.fchip:hover { background: rgba(255,255,255,.06); }
+.fchip:active { transform: scale(.97); }
+.fchip input { position: absolute; opacity: 0; pointer-events: none; }
+.fchip svg { width: 15px; height: 15px; flex: none; }
+.fchip small { display: block; font-size: 10.5px; color: var(--text-3); font-weight: 400; }
+.fchip:has(input:checked) { background: rgba(242,181,58,.11); border-color: rgba(242,181,58,.5); color: #fde7b0; box-shadow: 0 0 20px -10px rgba(242,181,58,.9); }
+.fchip:has(input:focus-visible) { outline: 2px solid var(--brew-hi); outline-offset: 2px; }
+.fchip .check { margin-left: auto; width: 16px; height: 16px; border-radius: 5px; border: 1.5px solid var(--hair-strong); display: grid; place-items: center; transition: background .2s, border-color .2s; }
+.fchip .check::after { content: ""; width: 8px; height: 4px; border-left: 2px solid #1a1203; border-bottom: 2px solid #1a1203; transform: rotate(-45deg) scale(0); transition: transform .3s var(--ease-spring); margin-top: -2px; }
+.fchip:has(input:checked) .check { background: var(--brew-hi); border-color: var(--brew-hi); }
+.fchip:has(input:checked) .check::after { transform: rotate(-45deg) scale(1); }
+
+/* Legend */
+#legend-stack { position: fixed; z-index: 1030; top: 80px; left: 12px; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.lg-card { padding: 10px 12px; min-width: 176px; border-radius: 13px; animation: sdx-rise .5s var(--ease-out) backwards; pointer-events: auto; }
+.lg-title { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); margin-bottom: 7px; }
+.lg-ramp { height: 7px; border-radius: 999px; background: linear-gradient(90deg, #396fd0, #6da7ec 21%, #c3c2b7 42%, #ec835a 68%, #e34948); }
+.lg-ticks { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-3); margin-top: 4px; }
+.lg-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); margin-top: 7px; }
+.sw { width: 14px; height: 14px; border-radius: 50%; flex: none; }
+.sw.fog { border-radius: 4px; background: rgba(124,200,242,.55); box-shadow: 0 0 10px rgba(124,200,242,.6); }
+.sw.brew { background: radial-gradient(circle at 32% 26%, var(--brew-hi), var(--brew)); }
+.sw.taco { background: radial-gradient(circle at 32% 26%, var(--taco-hi), var(--taco)); }
+.sw.line { height: 3px; width: 16px; border-radius: 2px; background: repeating-linear-gradient(90deg, var(--brew-hi) 0 3px, transparent 3px 7px); }
+.sw.surf { background: rgba(34,211,238,.45); border: 2px solid #22d3ee; }
+
+/* Toast */
+#toast {
+  position: fixed; z-index: 1200; top: 82px; left: 50%; transform: translate(-50%, -14px); opacity: 0; pointer-events: none;
+  padding: 9px 14px; border-radius: 12px; font-size: 13px; color: var(--text); max-width: min(92vw, 440px); text-align: center;
+  transition: transform .45s var(--ease-spring), opacity .3s;
+}
+#toast.is-on { transform: translate(-50%, 0); opacity: 1; }
+
+/* Module 1 sidebar pieces */
+.chart-wrap { position: relative; height: 220px; }
+.cursor-line { position: absolute; left: 0; top: 0; width: 1px; height: 0; pointer-events: none; background: linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,.55) 20%, rgba(255,255,255,.55) 80%, rgba(255,255,255,0)); will-change: transform; animation: sdx-fade .5s ease .7s backwards; }
+.cdot { position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%; background: var(--c); border: 2px solid #0b1020; box-shadow: 0 0 12px var(--c); pointer-events: none; will-change: transform; animation: sdx-fade .5s ease .8s backwards; }
+.series-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 8px; }
+.series-legend .it { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+.series-legend .it i { width: 14px; height: 3px; border-radius: 2px; background: var(--c); box-shadow: 0 0 8px var(--c); }
+.series-legend .it b { color: var(--text); font-weight: 600; }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tile { padding: 11px 12px; border-radius: 12px; background: rgba(255,255,255,.03); border: 1px solid var(--hair); position: relative; overflow: hidden; }
+.tile::before { content: ""; position: absolute; right: -18px; top: -18px; width: 60px; height: 60px; border-radius: 50%; background: var(--c, transparent); opacity: .16; filter: blur(12px); transition: background .6s; }
+.tile .tn { font-size: 11px; color: var(--text-3); display: flex; align-items: center; gap: 6px; }
+.tile .tn i { width: 7px; height: 7px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
+.tile .tv { font-size: 22px; font-weight: 600; margin-top: 4px; letter-spacing: -0.02em; }
+.tile .th { font-size: 11px; color: var(--text-3); margin-top: 1px; }
+.meter { height: 8px; border-radius: 999px; background: rgba(148,163,184,.12); overflow: hidden; }
+.meter > i { display: block; height: 100%; width: 100%; transform-origin: 0 50%; border-radius: 999px; background: linear-gradient(90deg, #7cc8f2, #e0f2fe); box-shadow: 0 0 14px rgba(124,200,242,.7); will-change: transform; }
+
+/* Popup contents */
+.pp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 600; letter-spacing: .03em;
+  color: var(--bc, #cbd5e1); background: color-mix(in srgb, var(--bc, #94a3b8) 16%, transparent); border: 1px solid color-mix(in srgb, var(--bc, #94a3b8) 35%, transparent); }
+.pp-name { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.pp-temp { font-size: 30px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; margin-top: 2px; }
+.pp-stats { display: flex; gap: 12px; font-size: 12px; color: var(--text-2); margin: 4px 0 8px; }
+.pp-foot { font-size: 12px; color: var(--text-2); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--hair); }
+.pp-note { font-size: 10.5px; color: var(--text-3); margin-top: 6px; }
+.spark { display: block; width: 100%; height: auto; }
+.spark .night { fill: rgba(99,102,241,.1); }
+.tagrow { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.tag { font-size: 11px; padding: 2px 7px; border-radius: 6px; color: var(--text-3); background: rgba(255,255,255,.03); border: 1px solid var(--hair); }
+.tag.on { color: #fde7b0; border-color: rgba(242,181,58,.4); background: rgba(242,181,58,.1); }
+
+/* Module 2 sidebar pieces */
+.donut-wrap { position: relative; height: 188px; }
+.donut-center { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; text-align: center; }
+.donut-center b { display: block; font-size: 32px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; }
+.donut-center span { font-size: 11px; color: var(--text-3); }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.split > div { padding: 9px 10px; border-radius: 11px; background: rgba(255,255,255,.03); border: 1px solid var(--hair); }
+.split .k { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-2); }
+.split .v { font-size: 18px; font-weight: 600; margin-top: 3px; }
+.split .v small { font-size: 11px; color: var(--text-3); font-weight: 500; margin-left: 4px; }
+.sel {
+  appearance: none; -webkit-appearance: none; font-size: 12px; color: var(--text); padding: 5px 26px 5px 10px; border-radius: 9px; max-width: 150px;
+  background: rgba(255,255,255,.05) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a8b4c6' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center;
+  border: 1px solid var(--hair); cursor: pointer;
+}
+.sel option { background: #0f1626; }
+.hood-rows { display: flex; flex-direction: column; gap: 3px; }
+.hrow { display: grid; grid-template-columns: 104px 1fr 38px; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 9px; font-size: 12px; color: var(--text-2); text-align: left; transition: background .2s, color .2s; }
+.hrow:hover { background: rgba(255,255,255,.05); color: var(--text); }
+.hrow.is-on { background: rgba(255,255,255,.07); color: var(--text); box-shadow: inset 0 0 0 1px var(--hair-strong); }
+.hrow .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hbar { display: flex; gap: 2px; height: 8px; }
+.hbar i { display: block; height: 100%; border-radius: 4px; transition: width .6s var(--ease-out); min-width: 0; }
+.hbar i.b { background: var(--brew); } .hbar i.t { background: var(--taco); }
+.hrow .ct { text-align: right; color: var(--text-3); }
+.steps { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.step { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 11px; background: rgba(255,255,255,.03); border: 1px solid var(--hair); text-align: left; transition: background .2s, transform .2s var(--ease-out); animation: sdx-rise .45s var(--ease-out) backwards; }
+.step:hover { background: rgba(255,255,255,.06); transform: translateX(2px); }
+.step .n { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; color: #fff; background: radial-gradient(circle at 32% 26%, var(--taco-hi), var(--taco)); }
+.step .t { font-size: 12.5px; font-weight: 500; }
+.step .m { font-size: 11px; color: var(--text-3); }
+.step .w { font-size: 12px; color: #fde7b0; }
+.crawl-hint { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; color: var(--text-2); line-height: 1.45; }
+.crawl-hint svg { width: 18px; height: 18px; flex: none; color: var(--brew-hi); margin-top: 1px; }
+
+/* =====================================================================
+   KEYFRAMES
+   ===================================================================== */
+@keyframes sdx-fade { from { opacity: 0; } }
+@keyframes sdx-rise { from { opacity: 0; transform: translateY(8px); } }
+@keyframes sdx-drop { from { opacity: 0; transform: translateY(-16px); } }
+@keyframes sdx-slide-up { from { opacity: 0; transform: translateY(22px); } }
+@keyframes sdx-pop { from { opacity: 0; transform: translateY(10px) scale(.4); } }
+@keyframes sdx-pop-out { to { opacity: 0; transform: scale(.3); } }
+@keyframes sdx-pop-card { from { opacity: 0; transform: translateY(6px) scale(.94); } }
+@keyframes sdx-ring { 0% { transform: scale(.75); opacity: .95; } 100% { transform: scale(2); opacity: 0; } }
+@keyframes sdx-ants { to { stroke-dashoffset: -22; } }
+@keyframes sdx-fog-a { from { transform: translate3d(-12px, 5px, 0); } to { transform: translate3d(14px, -7px, 0); } }
+@keyframes sdx-fog-b { from { transform: translate3d(10px, -4px, 0); } to { transform: translate3d(-16px, 8px, 0); } }
+@keyframes sdx-breathe { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
+
+/* =====================================================================
+   RESPONSIVE
+   ===================================================================== */
+@media (max-width: 899px) {
+  :root { --sb-w: auto; }
+  #topbar { flex-wrap: wrap; gap: 8px 10px; }
+  .chips { order: 3; width: 100%; }
+  #sidebar { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: min(68vh, 620px); z-index: 1060; transform: translateY(calc(100% + 24px)); }
+  #dock { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 46vh; }
+  #legend-stack { top: 124px; left: 8px; }
+  .leaflet-top { top: 120px; }
+  #toast { top: 128px; }
+  .lg-card { min-width: 150px; padding: 8px 10px; }
+}
+@media (max-width: 520px) {
+  .brand p { display: none; }
+  #legend-stack { display: none; }
+  .time-big { font-size: 22px; }
+}
+
+/* Reduced motion: instant state changes, no ambient drift/pulses */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; transition-delay: 0ms !important; }
+  .leaflet-fog-pane, .leaflet-fogtex-pane { animation: none !important; }
+  path.crawl-line.ants { animation: none !important; stroke-dasharray: 6 6; }
+}
+</style>
+</head>
+<body>
+
+<div id="map" role="application" aria-label="Map of San Diego"></div>
+
+<header id="topbar" class="sdx-glass">
+  <div class="brand flex items-center gap-3 min-w-0">
+    <div class="logo" aria-hidden="true"><i data-lucide="layers"></i></div>
+    <div class="min-w-0">
+      <h1>SD Multi-Layer Explorer</h1>
+      <p>Microclimates, marine layer &amp; taco-brew crawls across San Diego</p>
+    </div>
+  </div>
+  <nav id="chips" class="chips" aria-label="Map layers"><span id="chip-ind" class="chip-ind" aria-hidden="true"></span></nav>
+  <div class="ml-auto flex items-center gap-1 relative">
+    <button id="bm-toggle" class="btn-icon" type="button" aria-controls="bm-pop" aria-expanded="false" aria-haspopup="dialog" aria-label="Basemap settings" title="Basemap">
+      <i data-lucide="map"></i><span class="key-dot" aria-hidden="true"></span>
+    </button>
+    <div id="bm-pop" class="bm-pop sdx-glass" role="dialog" aria-label="Basemap settings" hidden>
+      <div class="lbl">Basemap</div>
+      <div id="bm-status" class="sub">Now showing: …</div>
+      <form id="bm-form" class="bm-form">
+        <label for="bm-key" class="eyebrow">CARTO basemaps API key</label>
+        <div class="flex gap-2">
+          <input id="bm-key" class="inp mono" type="text" autocomplete="off" spellcheck="false" placeholder="Paste your key">
+          <button class="btn" type="submit">Save</button>
+        </div>
+      </form>
+      <div class="flex items-center justify-between gap-2" style="margin-top:10px">
+        <a class="link" href="https://carto.com/basemaps/apikey/" target="_blank" rel="noopener noreferrer">Get a free key ↗</a>
+        <button id="bm-clear" class="btn" type="button">Use fallback</button>
+      </div>
+      <p class="sub" style="margin-top:10px">CARTO Dark Matter tiles need a free key (non-commercial: up to 5M tiles/month). It's stored only in this browser.</p>
+    </div>
+    <button id="sb-toggle" class="btn-icon" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Toggle analytics panel" title="Analytics">
+      <i data-lucide="panel-right-open"></i>
+    </button>
+  </div>
+</header>
+
+<div id="legend-stack" aria-label="Legend"></div>
+
+<aside id="sidebar" class="sdx-glass" aria-label="Analytics">
+  <div class="sb-head">
+    <div id="sb-title" class="flex items-center gap-3 min-w-0 flex-1"></div>
+    <button id="sb-close" class="btn-icon" type="button" aria-label="Close analytics panel"><i data-lucide="panel-right-close"></i></button>
+  </div>
+  <div id="sb-body" class="sb-body"></div>
+</aside>
+
+<section id="dock" class="sdx-glass" aria-label="Layer controls">
+  <div id="dock-tabs" class="dock-tabs" role="tablist" aria-label="Active layers" hidden></div>
+  <div id="dock-body"></div>
+</section>
+
+<div id="toast" class="sdx-glass" role="status" aria-live="polite"></div>
+
+<noscript><div style="position:fixed;inset:0;display:grid;place-items:center;color:#e6edf7">This map needs JavaScript.</div></noscript>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+
+<!-- =====================================================================
+     ENGINE: pure data + math + registry. No DOM, no Leaflet.
+     tests/engine.test.mjs extracts and runs this block in node:vm.
+     ===================================================================== -->
+<script id="sdx-engine">
+(function (root) {
+  'use strict';
+
+  // ------------------------------------------------------------------ data
+  const hood = (id, name, zone, lat, lon, offset = 0) => ({ id, name, zone, lat, lon, offset });
+
+  const NEIGHBORHOODS = [
+    // Coastal
+    hood('la-jolla', 'La Jolla', 'coastal', 32.8328, -117.2713, 0.5),
+    hood('pacific-beach', 'Pacific Beach', 'coastal', 32.7978, -117.2400, 0),
+    hood('coronado', 'Coronado', 'coastal', 32.6859, -117.1831, 0.5),
+    hood('ocean-beach', 'Ocean Beach', 'coastal', 32.7479, -117.2470, -0.5),
+    hood('del-mar', 'Del Mar', 'coastal', 32.9595, -117.2653, 0),
+    hood('point-loma', 'Point Loma', 'coastal', 32.7270, -117.2290, 0.5),
+    hood('encinitas', 'Encinitas', 'coastal', 33.0370, -117.2920, -0.5),
+    // Central / South
+    hood('downtown', 'Downtown', 'central', 32.7157, -117.1611, 0.5),
+    hood('north-park', 'North Park', 'central', 32.7479, -117.1296, 0),
+    hood('chula-vista', 'Chula Vista', 'central', 32.6401, -117.0842, 0.5),
+    hood('hillcrest', 'Hillcrest', 'central', 32.7480, -117.1640, -0.5),
+    hood('mission-valley', 'Mission Valley', 'central', 32.7700, -117.1600, 1),
+    hood('barrio-logan', 'Barrio Logan', 'central', 32.6973, -117.1426, 0),
+    // Inland
+    hood('el-cajon', 'El Cajon', 'inland', 32.7948, -116.9625, 1),
+    hood('escondido', 'Escondido', 'inland', 33.1192, -117.0864, 0.5),
+    hood('santee', 'Santee', 'inland', 32.8384, -116.9739, 0.5),
+    hood('poway', 'Poway', 'inland', 32.9628, -117.0359, 0),
+    hood('rancho-bernardo', 'Rancho Bernardo', 'inland', 33.0197, -117.0747, -0.5),
+    hood('la-mesa', 'La Mesa', 'inland', 32.7678, -117.0231, -1),
+    hood('miramar', 'Miramar', 'inland', 32.8870, -117.1440, -1),
+    // Mountain
+    hood('julian', 'Julian', 'mountain', 33.0787, -116.6020, 0),
+    hood('alpine', 'Alpine', 'mountain', 32.8351, -116.7664, 1),
+    hood('ramona', 'Ramona', 'mountain', 33.0417, -116.8681, 1.5),
+    // More of the county: North County, South Bay, the mesas and East County
+    hood('oceanside', 'Oceanside', 'coastal', 33.1959, -117.3795, 0),
+    hood('carlsbad', 'Carlsbad', 'coastal', 33.1581, -117.3506, 0.5),
+    hood('imperial-beach', 'Imperial Beach', 'coastal', 32.5839, -117.1131, 0),
+    hood('national-city', 'National City', 'central', 32.6781, -117.0992, 0.5),
+    hood('kearny-mesa', 'Kearny Mesa', 'central', 32.8337, -117.1430, 1),
+    hood('clairemont', 'Clairemont', 'central', 32.8266, -117.1946, -0.5),
+    hood('vista', 'Vista', 'inland', 33.2000, -117.2425, -0.5),
+    hood('san-marcos', 'San Marcos', 'inland', 33.1434, -117.1661, 0),
+    hood('fallbrook', 'Fallbrook', 'inland', 33.3764, -117.2512, -1),
+    hood('lakeside', 'Lakeside', 'inland', 32.8573, -116.9222, 1),
+  ];
+
+  // County-wide breweries + taco shops from OpenStreetMap, baked in by scripts/fetch-pois.mjs.
+  /* POI-DATA:BEGIN (generated by scripts/fetch-pois.mjs on 2026-09-26; (c) OpenStreetMap contributors, ODbL) */
+  const POI_ROWS = [
+    ["b-n5870511618","b","3 Punk Ales Brewing Company",32.64279,-117.08031,0,"259 3rd Avenue, Chula Vista",""],
+    ["b-n597057591","b","AleSmith Brewing Company",32.88817,-117.14964,0,"9990 AleSmith Ct, San Diego",""],
+    ["b-n5211691721","b","Amplified Ale Works",32.79104,-117.25433,0,"",""],
+    ["b-w31802906","b","Annhaueser-Busch Brewing Co",32.83025,-117.23146,0,"5885 Santa Fe Street, San Diego",""],
+    ["b-n3786904259","b","Arcana",33.14034,-117.27382,0,"",""],
+    ["b-n13713514709","b","Asylum Brewing Company",32.74826,-117.13122,0,"2899 University Avenue, San Diego","Mo-Th 16:00-23:00; Fr-Sa 12:00-23:00; Su 12:00-22:00"],
+    ["b-w31842993","b","Ballast Point Brewery",32.88814,-117.15807,0,"9045 Carroll Way, San Diego",""],
+    ["b-n1404687760","b","Ballast Point Brewery & Distillery",32.89858,-117.11096,0,"",""],
+    ["b-n1914937399","b","Ballast Point Brewing & Home Brew Mart",32.76675,-117.19531,0,"5401 Linda Vista Road, San Diego",""],
+    ["b-n3884049822","b","Ballast Point Tasting Room & Kitchen Restaurant",32.72767,-117.16968,0,"",""],
+    ["b-n4932661728","b","Barrel & Stave Tap house",33.20245,-117.2424,0,"206 Main Street, Vista",""],
+    ["b-n4852890305","b","Battlemage Brewing Company",33.14033,-117.22746,0,"",""],
+    ["b-n9215210435","b","Bay City Brewing Co Tasting Room",32.71202,-117.15724,0,"627 8th Avenue, San Diego",""],
+    ["b-n4978438221","b","Beer Company",32.71589,-117.15903,0,"",""],
+    ["b-n4852919671","b","Belching Beaver Brewery",33.14495,-117.22891,0,"",""],
+    ["b-n596681408","b","Belching Beaver Brewery Tavern and Grill",33.20212,-117.24103,0,"302 East Broadway, Vista","Mo-Fr 12:00-21:00"],
+    ["b-n1791247876","b","Blind Lady Ale House",32.76348,-117.12028,0,"3416 Adams Avenue, San Diego",""],
+    ["b-n3884034950","b","Bolt Brewery",32.72529,-117.16875,0,"",""],
+    ["b-n12146940539","b","Boochcraft",32.94979,-117.23387,0,"",""],
+    ["b-n6549507497","b","Border X Brewing",32.69812,-117.13979,0,"2181 Logan Avenue","Su 10:00-20:00; Mo-Th 14:00-22:00; Fr-Sa 12:00-23:00"],
+    ["b-n10628039199","b","Breakwater Brewing Co.",33.19509,-117.37912,0,"",""],
+    ["b-n5870511623","b","Brewjeria Tap Room & Kitchen",32.6433,-117.08049,0,"241 3rd Avenue, Chula Vista",""],
+    ["b-n5870511675","b","Chula Vista Brewery",32.64159,-117.08022,0,"294 3rd Avenue, Chula Vista","Mo,Tu 12:00-21:00;We,Th 12:00-23:00;Fr, Sa 12:00-01:00;Su 12:00-22:00"],
+    ["b-n5190933821","b","Coronado Brewing Company",32.7719,-117.20453,0,"1205 Knoxville Street, San Diego",""],
+    ["b-w363141081","b","Coronado Brewing Company",32.69787,-117.17329,0,"154 Orange Avenue, Coronado",""],
+    ["b-w549619388","b","Coronado Brewing Company - Imperial Beach",32.58053,-117.13137,0,"875 Seacoast Drive, Imperial Beach",""],
+    ["b-n9357102719","b","Creative Creature Brewing Company",32.79555,-116.96271,0,"110 North Magnolia Avenue, El Cajon",""],
+    ["b-n14111612005","b","Cutwater",32.88456,-117.16328,0,"9750 Distribution Avenue, San Diego",""],
+    ["b-n9330877224","b","Dog Leg Brewing",33.13558,-117.23551,0,"Keystone Way",""],
+    ["b-n12947444501","b","Eppig Brewing",33.13562,-117.23472,0,"1347 Keystone Way",""],
+    ["b-n5190989421","b","Eppig Brewing",32.70877,-117.15756,0,"795 J Street",""],
+    ["b-n6313226249","b","Eppig Brewing North Park",32.75584,-117.12873,0,"",""],
+    ["b-n12460348826","b","Fall Brewing Company",32.76003,-117.13042,0,"",""],
+    ["b-n11921190969","b","Fall Brewing Company South Park Taproom",32.72979,-117.12937,0,"3010 Juniper Street",""],
+    ["b-n3815234025","b","Fallbrook Brewing Company",33.3827,-117.25154,0,"136 North Main Avenue, Fallbrook",""],
+    ["b-w1423651436","b","Fox Point Brewing",33.06811,-117.27844,0,"",""],
+    ["b-n13712955585","b","Gravity Heights",32.90069,-117.1913,0,"9920 Pacific Heights Boulevard, San Diego",""],
+    ["b-n5870511658","b","Groundswell Brewing Company",32.64266,-117.08065,0,"258 3rd Avenue","Mo-Th 12:00-22:00;Sa 11:00-00:00;Su 11:00-22:00"],
+    ["b-n11173427237","b","Helix Brewing Company",32.77198,-117.02342,0,"8101 Commercial Street","Su 12:00-19:00; Mo-Th 15:00-21:00; Fr-Sa 12:00-22:00"],
+    ["b-n1974496732","b","Hillcrest Brewing Company",32.74904,-117.14986,0,"1458 University Avenue, San Diego",""],
+    ["b-n8766582908","b","Hoppy Daze Tap House",32.57388,-117.05533,0,"1280 Picador Boulevard, San Diego",""],
+    ["b-n13017713001","b","Julian Beer Co.",33.07918,-116.60359,0,"2307 Main Street","Mo-Th 11:00-20:00; Fr 11:00-21:00; Sa-Su 10:00-21:00"],
+    ["b-n596594460","b","Kairoa Brewing Company",32.76119,-117.14605,0,"4601 Park Boulevard, San Diego",""],
+    ["b-w131923861","b","Karl Strauss Brewing",32.89654,-117.20179,0,"","Su-Th 11:00-21:00; Fr,Sa 11:00-22:00"],
+    ["b-w654082323","b","Karl Strauss Brewing Co.",33.12444,-117.31404,0,"","Su-Th 11:00-21:00; Fr,Sa 11:00-22:00"],
+    ["b-w155738397","b","Karl Strauss Brewing Company",33.02144,-117.11342,0,"10448 Reserve Drive, San Diego",""],
+    ["b-w31801894","b","Karl Strauss Brewing Company",32.83268,-117.23145,0,"5985 Santa Fe Street, San Diego",""],
+    ["b-n6970728340","b","Kensington Brewing Company",32.76309,-117.10759,0,"4067 Adams Avenue",""],
+    ["b-n596650915","b","Kilowatt Brewing",32.74535,-117.24948,0,"1875 Cable Street, San Diego",""],
+    ["b-n7723071347","b","Kilowatt Brewing",32.83311,-117.15646,0,"7576 Clairemont Mesa Boulevard, San Diego","Mo-Th 15:00-22:00; Fr-Sa 12:00-24:00; Su 13:00-20:00"],
+    ["b-n597068228","b","Little Bird Brewing",32.73938,-117.12547,0,"3176 Thorn Street, San Diego",""],
+    ["b-n14021173513","b","Little Miss Brewing",32.93372,-117.06072,0,"12265 Scripps Poway Parkway, Poway",""],
+    ["b-n8232815545","b","Machete Beer House",32.66481,-117.09318,0,"",""],
+    ["b-n12170372073","b","Meadiocrity Mead",33.14338,-117.1938,0,"1365 Grand Avenue, San Marcos","We 17:00-21:00; Th 17:00-21:00; Fr 16:30-21:30; Sa 15:00-21:00; Su 14:00-18:00"],
+    ["b-n596158252","b","Mike Hess Brewing",32.74771,-117.12848,0,"3812 Grim Avenue, San Diego","Su-Fr 12:00-22:00; Sa 12:00-23:00"],
+    ["b-n5467441986","b","Mike Hess Brewing - Seaport Village Biergarten",32.70941,-117.17193,0,"",""],
+    ["b-n11474726471","b","Mike Hess Brewing - Seaport Village Taphouse",32.7088,-117.16878,0,"",""],
+    ["b-n6439509618","b","Mike Hess Brewing Imperial Beach",32.58072,-117.13208,0,"805 Ocean Lane, Imperial Beach",""],
+    ["b-n597092150","b","Mike Hess Brewing Tasting Room",32.75069,-117.24489,0,"4895 Voltaire Street, San Diego",""],
+    ["b-n4892523943","b","Mission Brewery",32.70709,-117.15156,0,"",""],
+    ["b-n5388224317","b","Mission Brewing (fka Rough Draft)",32.87544,-117.22302,0,"3869 Miramar Street, La Jolla","Mo-Su 18:00-22:00"],
+    ["b-n6568889289","b","Modern Times Beer",32.75419,-117.20622,0,"3725 Greenwood Street, San Diego","Mo-Th 12:00-22:00; Fr 12:00-00:00; Sa 11:00-00:00; Su 11:00-22:00"],
+    ["b-n11192125837","b","Mujeres Brew",32.70194,-117.14138,0,"","Sa-Su 12:00-21:00; Tu-Th 16:00-22:00; Fr 12:00-22:00"],
+    ["b-n13878422219","b","Newtopia Cyder",32.90325,-117.11071,0,"10045 Carroll Canyon Road, San Diego",""],
+    ["b-n13816079607","b","North Park Beer Co",32.74863,-117.12907,0,"3038 University Avenue",""],
+    ["b-n13568754314","b","North Park Beer Company",32.73754,-117.1602,0,"3095 5th Avenue, San Diego",""],
+    ["b-n8873711080","b","North Pine Brewing",32.94952,-117.23388,0,"",""],
+    ["b-n12700512601","b","Novo Brazil Brewing",32.76839,-117.14698,0,"1640 Camino del Rio North",""],
+    ["b-n9301890188","b","Novo Brazil Brewing",32.62339,-116.96713,0,"",""],
+    ["b-n7179577182","b","O.B. Brewery",32.74722,-117.25196,0,"5041 Newport Avenue",""],
+    ["b-w255173559","b","Oceanside Ale Works",33.21169,-117.27268,0,"1800 Ordway Way, Oceanside",""],
+    ["b-w31816397","b","Oggi's Pizza",32.95426,-117.22948,0,"12840 Carmel Country Road, San Diego",""],
+    ["b-n1741818469","b","Oggi's Pizza & Brewing Co.",32.77983,-117.12896,0,"2245 Fenton Parkway, San Diego",""],
+    ["b-n596649040","b","Oggi's Pizza and Brewing Co.",32.96549,-117.08979,0,"10155 Rancho Carmel Drive, San Diego",""],
+    ["b-w31842625","b","Original 40 Brewing Company",32.74828,-117.12665,0,"3117 University Avenue, San Diego",""],
+    ["b-n6313226248","b","Pariah Brewing Company",32.75572,-117.12875,0,"",""],
+    ["b-n596439529","b","Pizza Port",32.99293,-117.27222,0,"135 Highway 101, Solana Beach","Mo-Su 11:00-22:00; Fr,Sa 11:00-24:00"],
+    ["b-w31841926","b","Pizza Port",32.74799,-117.25036,0,"1956 Bacon Street, San Diego",""],
+    ["b-w405142153","b","Pizza Port",33.15985,-117.34775,0,"571 Carlsbad Village Drive, Carlsbad",""],
+    ["b-w722994058","b","Pizza Port",33.12866,-117.25002,0,"",""],
+    ["b-w1268969029","b","Pizza Port Brewing Company",32.58421,-117.12947,0,"204 Palm Avenue, Imperial Beach",""],
+    ["b-n6568887431","b","Pizza Port Ocean Beach",32.74792,-117.25036,0,"1956 Bacon Street, San Diego","Mo-Su 11:00-23:00"],
+    ["b-n13939409462","b","Preston's Brewery & Taproom",32.89642,-117.13734,0,"8680 Miralani Drive, San Diego",""],
+    ["b-n12324826490","b","Protector Brewery",32.71637,-117.17227,0,"",""],
+    ["b-n13939409463","b","Protector Brewery",32.89659,-117.13735,0,"8680 Miralani Drive, San Diego",""],
+    ["b-n6923607674","b","Pure Project",32.73535,-117.16016,0,"",""],
+    ["b-w1324832998","b","Pure Project Brewing",33.161,-117.35031,0,"2825 State Street, Carlsbad",""],
+    ["b-n7709004440","b","Quantum Brewing",32.83066,-117.13927,0,"5375 Kearny Villa Road, San Diego",""],
+    ["b-n6040659907","b","Reckless Brewing",32.88791,-117.15955,0,"",""],
+    ["b-w31810379","b","Resident Brewing",32.71657,-117.15988,0,"1065 5th Avenue, San Diego",""],
+    ["b-n7262247985","b","Rip Current",32.75237,-117.12988,0,"",""],
+    ["b-n4048295114","b","Rip Current Brewing Co.",33.14276,-117.19255,0,"1325 Grand Avenue, San Marcos",""],
+    ["b-n2609126216","b","Rough Draft Brewing Company",32.88396,-117.17151,0,"",""],
+    ["b-n8870930724","b","Rough Draft Brewing Company",32.94975,-117.23388,0,"12925 El Camino Real",""],
+    ["b-w31817792","b","Societe Brewing Company",32.83389,-117.14638,0,"8262 Clairemont Mesa Boulevard, San Diego",""],
+    ["b-n4442511168","b","South Park Brewing",32.72171,-117.13007,0,"1517 30th Street, San Diego",""],
+    ["b-w1107890572","b","Stone Brewing Company",32.73241,-117.20398,0,"",""],
+    ["b-w36290181","b","Stone Brewing Company",33.11568,-117.12001,0,"1999 Citracado Parkway, Escondido","Su-Th 11:00-22:00; Fr-Sa 11:00-23:00"],
+    ["b-n7110938323","b","Stone Brewing Tap Room",32.71792,-117.16948,0,"1202 Kettner Boulevard, San Diego","Su-Th 12:00-21:00; Fr-Sa 12:00-22:00"],
+    ["b-n2699524137","b","Stone Brewing World Bistro & Gardens",32.74042,-117.21153,0,"2816 Historic Decatur Road, San Diego","Mo-Fr, Su 11:30-21:00; Sa 11:30-22:00"],
+    ["b-w97906041","b","Stone Brewing World Bistro & Gardens",33.11648,-117.12003,0,"",""],
+    ["b-n11192190037","b","The Church by The Lost Abbey",32.70925,-117.15244,0,"1313 J Street","Su 13:00-20:00; Mo-We 14:00-21:00; Th-Sa 14:00-22:00"],
+    ["b-n5897657085","b","The Cork and Craft",33.02361,-117.08593,0,"",""],
+    ["b-n10164930455","b","The Lost Abbey",33.09874,-117.1993,0,"1215 San Elijo Road, San Marcos",""],
+    ["b-n8616322347","b","Viewpoint Brewing Company",32.97,-117.26192,0,"2201 San Dieguito Drive, Del Mar",""],
+    ["b-n596378228","b","Villains Brewing Company",32.71025,-117.15627,0,"903 Island Avenue, San Diego","Mo-Th,Su 11:00-22:00; Fr-Sa 11:00-23:00"],
+    ["b-n4932661729","b","Wavelength Brewing Company",33.20282,-117.24188,0,"236 Main Street, Vista",""],
+    ["b-n9848815059","b","Westbrew",32.95945,-117.26495,0,"1435 Camino del Mar","Mo-Th 11:00-20:00; Fr 11:00-21:00; Sa 10:00-21:00; Su 10:00-20:00"],
+    ["t-n8211220803","t","Adalberto's Mexican Food",32.71184,-117.14047,0,"2498 Market Street",""],
+    ["t-w1359377595","t","Agave Taco Shop",32.75339,-117.22386,0,"4111 W Point Loma Blvd, San Diego",""],
+    ["t-w404106700","t","Albertaco's",33.16627,-117.21484,0,"601 Sycamore Avenue, Vista",""],
+    ["t-n3160079289","t","Albertaco's Mexican Food",32.7681,-117.05433,1,"6685 El Cajon Boulevard, San Diego","24/7"],
+    ["t-n4063505924","t","Albertacos",33.13946,-117.17211,0,"500 West San Marcos Boulevard, San Marcos",""],
+    ["t-n597011507","t","Albertacos",33.18696,-117.27997,0,"1805 Hacienda Drive",""],
+    ["t-w1113772995","t","Alberto's Mexican Food",33.19958,-117.38235,0,"520 North Coast Highway, Oceanside",""],
+    ["t-w94893856","t","Alberto's Mexican Food",33.12653,-117.08876,0,"623 North Escondido Boulevard",""],
+    ["t-n12487171131","t","Alberto’s Mexican Food",33.19512,-117.38027,0,"",""],
+    ["t-w823971944","t","Alberto's Taco Shop",32.57514,-117.10552,0,"1183 13th Street",""],
+    ["t-n11111048405","t","Antojitos Te",32.74222,-117.02675,0,"7977 #b Broadway","Mo-Su 09:00-21:00"],
+    ["t-n12080353683","t","Areli's Taco Shop",32.79831,-117.24584,0,"",""],
+    ["t-n2492702461","t","Armando's Taco Shop",32.90081,-117.19356,0,"10066 Pacific Heights Boulevard, San Diego","Mo-Fr 06:00-14:00; Sa 07:00-14:00"],
+    ["t-n5900898125","t","Asada Mexican Restaurant",32.59453,-117.03965,1,"4340 Main Street, Chula Vista","24/7"],
+    ["t-n9215210436","t","Azteca Taco Shop",32.71122,-117.15356,0,"555 Park Boulevard, San Diego",""],
+    ["t-n596674805","t","Bad Hombres Good Mexican Food",32.83921,-116.99619,0,"8918 Carlton Hills Boulevard, Santee","Mo-Su 08:00-22:00"],
+    ["t-n10583625350","t","Baja Betty's",32.74829,-117.15067,2,"1421 University Avenue, San Diego",""],
+    ["t-n8666326090","t","Beach + Taco Shack",32.68054,-117.17955,0,"",""],
+    ["t-n13411348101","t","Birrieria & Taqueria La Huasteca",32.80875,-117.25781,0,"865 Turquoise Street, San Diego",""],
+    ["t-n13837976522","t","Birrieria Enriques",32.74831,-117.14244,0,"2041 University Avenue, San Diego",""],
+    ["t-n13378765045","t","Blanco Tacos + Tequila",32.76759,-117.1657,0,"",""],
+    ["t-n13513536895","t","Bravo's Taco Shop",32.74772,-117.09218,0,"",""],
+    ["t-n4624291757","t","Bull Taco",33.02114,-117.28463,0,"",""],
+    ["t-n365357401","t","Burritos Luna Mexican Food",32.58358,-117.10426,0,"1337 Palm Avenue, Imperial Beach","08:00-24:00"],
+    ["t-n1459120295","t","Burros & Fries",32.82965,-117.20517,0,"4705 Clairemont Drive","Mo-Th 09:00-21:00; Fr-Su 09:00-22:00"],
+    ["t-n596826446","t","Burros & Fries",32.7413,-117.04846,0,"6929 Federal Boulevard, Lemon Grove","Mo-Su 07:00-23:00"],
+    ["t-n7708999681","t","Burros & Fries",32.83104,-117.13034,0,"9211 Clairemont Mesa Boulevard, San Diego",""],
+    ["t-n9409174381","t","Cali's & Fries",32.83146,-117.12104,0,"5150 Murphy Canyon Road, San Diego",""],
+    ["t-n1699122435","t","Caliente Mexican Grill",32.91628,-117.23665,0,"11815 Sorrento Valley Road, San Diego",""],
+    ["t-n11200728537","t","California Mexican Food",32.71568,-117.02613,0,"940 Cardiff Street","Su-Th 08:30-21:00; Fr-Sa 08:30-21:30"],
+    ["t-n9046935574","t","Carnitas Las Michoacanas",32.75488,-117.05568,0,"6513 University Avenue, San Diego",""],
+    ["t-n9036647090","t","Casero Taqueria",33.12793,-117.25292,0,"2674 Gateway Road",""],
+    ["t-w31816923","t","Castañeda's Mexican Food",32.83245,-117.14963,1,"San Diego","24/7"],
+    ["t-n8155089065","t","Castañedas Mexican Food",32.70895,-117.08651,0,"",""],
+    ["t-n2294806500","t","Cazadores Mexican Food",32.83746,-116.99439,0,"9331 Mission Gorge Road, Santee","Mo-Su 07:00-23:00"],
+    ["t-n9497024743","t","Chalo's Taco Shop",32.73087,-117.22414,0,"1868 Rosecrans Street, San Diego",""],
+    ["t-n12191904106","t","Chito's Taco Shop",33.0706,-117.07038,0,"3440 Del Lago Boulevard, Plaza del Lago",""],
+    ["t-n365317821","t","Chula Tacos",32.58348,-117.09653,0,"1719 Palm Avenue, San Diego","Mo-Su 11:00-24:00"],
+    ["t-n11699188569","t","City Tacos",32.74862,-117.12936,0,"3028 University Avenue, San Diego","Mo-Su 11:00-22:00"],
+    ["t-n3084856681","t","City Tacos",33.03912,-117.29271,0,"1031 South Coast Highway 101, Encinitas",""],
+    ["t-n550349005","t","City Tacos",32.79662,-117.25586,0,"",""],
+    ["t-n9046935570","t","City Tacos",32.90473,-117.22826,0,"11045 Roselle Street, San Diego",""],
+    ["t-n9215210431","t","City Tacos",32.70859,-117.15813,0,"323 7th Avenue, San Diego","Mo-Su 11:00-20:30"],
+    ["t-n5517976101","t","City Tacos Village Taqueria",32.76507,-117.01834,0,"8325 La Mesa Boulevard","Mo-Su 11:00-22:00"],
+    ["t-w31810506","t","Contodo Fresh Mexican Eats",32.70192,-117.03023,0,"111 South Meadowbrook Drive, San Diego","Mo-Su 10:00-21:00"],
+    ["t-w960979209","t","Cotija's Mexican Food",32.74831,-116.98808,0,"9664 Campo Road, Spring Valley",""],
+    ["t-n5438857835","t","Cotija's Taco Shop",32.96377,-117.15039,0,"13350 Camino del Sur, San Diego",""],
+    ["t-n1778306665","t","Cotijas",32.7113,-117.14263,0,"",""],
+    ["t-n1743961167","t","Cotijas Taco Shop",33.0246,-117.0749,0,"17090 Bernardo Center Drive, San Diego","Mo-Sa 07:00-22:00; Su 08:00-22:00"],
+    ["t-n6636188223","t","Cotijas Taco Shop",32.82125,-117.10031,0,"10645 Tierrasanta Boulevard, San Diego",""],
+    ["t-n11474729369","t","Crack Taco Shop",32.70859,-117.16896,0,"",""],
+    ["t-n9080829442","t","Crack Tacos",32.78022,-117.103,0,"",""],
+    ["t-n13022126885","t","Craftcoast Beer and Tacos",33.19465,-117.38131,0,"257 Mission Avenue, Oceanside","Mo-Fr 12:00-22:00, Sa-Su 11:00-22:00"],
+    ["t-n13973688619","t","D'Sotos Mexican Food",32.89502,-117.12825,0,"9272 Miramar Road, San Diego",""],
+    ["t-n9270946538","t","Daniel's Taco Shop",32.78802,-116.94414,0,"1104 East Washington Avenue, El Cajon",""],
+    ["t-n894762458","t","David's Homestyle Fresh Mexican",32.74505,-116.92799,0,"2451 Jamacha Road, El Cajon",""],
+    ["t-n596199592","t","Dieberto's",33.21822,-117.3407,0,"3371 Mission Avenue, Oceanside",""],
+    ["t-n1445194790","t","Diego's Taco Shop",32.84124,-116.78102,0,"",""],
+    ["t-n2321484276","t","Don Carlos Taco Shop",32.83974,-117.27519,0,"737 Pearl Street, La Jolla",""],
+    ["t-w549418974","t","Don Pancho's Taco Shop",32.58497,-117.11844,0,"",""],
+    ["t-n5870511621","t","Don Pedro Taco Shop",32.64316,-117.08042,0,"247 3rd Avenue, Chula Vista",""],
+    ["t-w31816052","t","Don Rios",32.95077,-117.10677,0,"",""],
+    ["t-n13431051899","t","Don Roman Taco Shop",32.76088,-117.06584,0,"",""],
+    ["t-n14080833566","t","Donato's Taco Shop",32.87906,-117.16857,0,"6780 Miramar Road, San Diego",""],
+    ["t-n365356349","t","Eat Mexican Food",32.72736,-117.22723,0,"",""],
+    ["t-n10038360071","t","El Azteca Taco Shop",32.7788,-117.01784,0,"8306 Parkway Drive, La Mesa",""],
+    ["t-n6582367070","t","El Charro Taco Shop",32.75052,-117.21357,1,"3445 Midway Drive, San Diego","24/7"],
+    ["t-w957931491","t","El Cilantro Mexican Grill",32.80006,-116.93665,0,"1285 East Madison Avenue, El Cajon",""],
+    ["t-w373357382","t","El Compadre",32.80197,-116.9355,1,"595 North 2nd Street, El Cajon","24/7"],
+    ["t-n12997955116","t","El Compadre Taco Shop & More",32.7558,-117.03962,0,"7327 University Avenue, La Mesa",""],
+    ["t-n3947003557","t","El Cotixan",33.05068,-117.26008,0,"",""],
+    ["t-w995061685","t","El Cotixan Mexican Food",32.8009,-116.9369,0,"538 North 2nd Street, El Cajon",""],
+    ["t-n493804295","t","El Cotixan Taco Shop",32.80221,-116.9977,0,"",""],
+    ["t-w31817836","t","El Gordo Mexican Food",32.82834,-117.15379,0,"4768 Convoy Street, San Diego",""],
+    ["t-w139188747","t","El Indio de Tijuana",33.13096,-117.08534,0,"810 North Broadway, Escondido",""],
+    ["t-n10957413519","t","El Pueblo Mexican Restaurant",33.02692,-117.27337,1,"820 Birmingham Drive","24/7"],
+    ["t-n13812810045","t","El Puerto Street Tacos",33.12314,-117.32094,0,"890 Palomar Airport Road, Carlsbad",""],
+    ["t-n13925335753","t","El Ranchito Taco Shop",32.95702,-117.03492,0,"13654 Poway Road, Poway",""],
+    ["t-n9971240956","t","El Rancho",32.83639,-117.02272,0,"8001 Mission Gorge Road, Santee","Mo-Sa 08:00-21:30"],
+    ["t-n654739925","t","El Rey Moro Taco Shop",32.83384,-117.19534,0,"4471 Clairemont Mesa Boulevard","Mo-Su 07:30-21:30"],
+    ["t-n11247917472","t","El Rodeo Taco Shop",32.79105,-117.08101,0,"5149 Waring Road, San Diego",""],
+    ["t-n3790905461","t","El Sabroso",32.74533,-117.19986,0,"",""],
+    ["t-n9046935568","t","Elena's Mexican Food",32.90183,-117.22535,0,"10920 Roselle Street, San Diego",""],
+    ["t-n596015234","t","Eriberto's Mexican Food",33.25511,-117.29977,0,"642 1/2 North Redondo Drive, Oceanside",""],
+    ["t-w31804294","t","Filiberto's Mexican Food",32.75366,-117.21713,0,"",""],
+    ["t-w981837972","t","Filibertos",32.77864,-117.01876,0,"",""],
+    ["t-n596898002","t","Frida's Taqueria",32.71086,-117.16121,0,"532 4th Avenue, San Diego",""],
+    ["t-n13271640271","t","Fruity Loco",32.70725,-117.00981,0,"507 Sweetwater Road, Spring Valley","Sa-Th 09:00-21:00; Fr 09:00-20:00"],
+    ["t-w1306082055","t","Gabriel's Taco Stand",32.82014,-117.17737,0,"",""],
+    ["t-n13384025724","t","Gualberto's Taco Shop",32.70957,-117.0638,0,"",""],
+    ["t-n7732677555","t","Gualberto's Taco Shop #2",32.83272,-117.13832,0,"5447 Kearny Villa Road, San Diego","Mo-Fr 06:00-21:00; Sa 06:00-19:00; Su 07:00-18:00"],
+    ["t-n12270054197","t","Haggo's Organic Taco",33.07081,-117.30446,0,"1302 North Coast Highway 101",""],
+    ["t-n9409191244","t","Harvest Taco Shop",32.83246,-117.12761,0,"9350 Clairemont Mesa Boulevard, San Diego","Mo-Fr 05:00-21:00; Sa 06:00-18:00; Su 08:00-17:00"],
+    ["t-n6127387951","t","Hermanos Taco Shop",32.60403,-117.07783,0,"1295 Broadway",""],
+    ["t-w275422485","t","Hibisco Tacos and More",32.766,-117.22659,0,"",""],
+    ["t-n597150601","t","Hilberto's Mexican Food",32.74394,-116.93343,0,"2648 Jamacha Road, El Cajon",""],
+    ["t-n13826141226","t","Humberto's Taco Shop",32.71596,-117.1399,0,"",""],
+    ["t-w31810369","t","It's A Taco Shop Mexican Food",32.75499,-117.22019,0,"",""],
+    ["t-n10269036052","t","Jilbertos",33.25638,-116.37692,0,"",""],
+    ["t-w100401025","t","Jorge's Mexican Food",33.12703,-117.07403,0,"675 East Valley Parkway, Escondido",""],
+    ["t-n5897888934","t","Joses Taco Shop",33.13536,-117.28701,0,"","Mo-Fr 07:00-19:00; Sa 07:00-14:00"],
+    ["t-w223373262","t","Juanita's Carnitas",33.05421,-117.29695,0,"290 North Coast Highway 101, Encinitas","Mo-Su 07:30-22:00"],
+    ["t-w75837492","t","Kennedy's Karne",33.13585,-117.0568,0,"1760 East Valley Parkway, Escondido",""],
+    ["t-n6582647223","t","Kiko’s Seafood",32.75742,-117.13904,2,"",""],
+    ["t-n12865494505","t","Kikos Place",32.77066,-117.15522,0,"",""],
+    ["t-n1436147923","t","Kotija Jr. Taco Shop",32.90671,-117.17445,0,"6695 Mira Mesa Boulevard, San Diego",""],
+    ["t-n2651320782","t","Kotija Jr. Taco Shop",32.94968,-117.24626,0,"2668 Del Mar Heights Road, Del Mar",""],
+    ["t-w1012852588","t","La Esquina Mexican Grill",32.77214,-117.01,0,"5100 Jackson Drive, La Mesa",""],
+    ["t-n1974495821","t","La Fuente Mexican",32.74824,-117.15267,0,"1227 University Avenue","Su 09:00-00:00; Mo-Tu 09:00-23:00; We-Sa 09:00-03:00"],
+    ["t-w1343860656","t","La Imperial Taqueria",32.60495,-117.06537,0,"",""],
+    ["t-n9206559787","t","La Moreña Mariscos",32.71523,-117.01351,2,"1157 Sweetwater Road, Spring Valley","Mo-Su 09:00-19:00"],
+    ["t-n12189223769","t","La Perla #3",32.72317,-117.23098,0,"","Mo-Fr 09:00-19:00; Sa 09:00-18:00"],
+    ["t-w959687888","t","La Posta De Acapulco",32.7482,-116.98272,0,"9914 Campo Road, Spring Valley",""],
+    ["t-n11418295177","t","Las Brisas Taqueria",33.37368,-117.25168,0,"1005 South Main Avenue, Fallbrook",""],
+    ["t-n13826139998","t","Las Cuatro Milpas",32.69963,-117.14509,0,"",""],
+    ["t-n596840123","t","Las Michoacanas",32.55307,-117.04603,0,"143 West San Ysidro Boulevard, San Ysidro",""],
+    ["t-n9181583849","t","Las Pinches Tortas",32.78924,-116.93052,0,"558 Jamacha Road, El Cajon",""],
+    ["t-n5753317994","t","Liticker’s",32.75146,-117.24597,0,"",""],
+    ["t-n1727146705","t","Lolita's Mexican Food",32.83235,-117.16051,0,"7305 Clairemont Mesa Boulevard, San Diego","07:00-21:00"],
+    ["t-n9215210448","t","Lolita's Mexican Food",32.70763,-117.15492,0,"202 Park Boulevard, San Diego",""],
+    ["t-n4638586232","t","Lolita's Taco Shop",32.62909,-117.04605,0,"413 Telegraph Canyon Road, Chula Vista","Mo-Th 07:00-22:00; Fr-Sa 07:00-23:00; Su 08:00-22:00"],
+    ["t-n4679676483","t","Lolita's Taco Shop",32.66112,-117.0298,0,"",""],
+    ["t-n13574892058","t","Los Amigos",32.85476,-116.97364,0,"10251 Mast Boulevard, Santee",""],
+    ["t-n10160671522","t","Los Amigos Mexican Food",33.00615,-116.81829,0,"",""],
+    ["t-w1486432916","t","Los Chavos",32.81379,-116.93608,0,"1340 North 2nd Street, El Cajon",""],
+    ["t-n6215380720","t","Los Chilaquiles",32.62411,-116.96767,0,"",""],
+    ["t-n12083760279","t","Los Dos Pedros",32.79778,-117.25209,0,"",""],
+    ["t-n3269844757","t","Los Palmitos Taco Shop",32.83411,-117.17969,0,"5145 Clairemont Mesa Boulevard",""],
+    ["t-n10736100981","t","Los Panchos Taco Shop",32.76669,-117.1833,0,"","Mo-Su 07:00-23:00"],
+    ["t-n2131738441","t","Los Panchos Taco Shop",32.74968,-117.16128,0,"409 Washington Street, San Diego",""],
+    ["t-n596895291","t","Los Panchos Taco Shop",32.79224,-117.0816,0,"5182 Waring Road, San Diego",""],
+    ["t-n7142024953","t","Los Panchos Taco Shop",32.62123,-116.96183,0,"",""],
+    ["t-n2397160554","t","Los Primos",33.01713,-117.07509,0,"16711 Bernardo Center Drive, San Diego",""],
+    ["t-n276539525","t","Los Primos Mexican Food",32.86266,-117.2243,0,"7770 Regents Road",""],
+    ["t-n596220250","t","Los Rancheritos Mexican Food",32.86114,-116.90073,0,"10205 Lake Jennings Park Road, Lakeside",""],
+    ["t-n596006090","t","Los Ranchero's Taco Shop",33.03394,-116.88274,0,"1847 Main Street, Ramona","Mo-Su 06:30-23:30"],
+    ["t-n7400008611","t","Los Tacos",33.17913,-117.29514,0,"3480 Marron Road, Oceanside",""],
+    ["t-w703474262","t","Los Taquitos",32.59558,-117.06431,1,"","24/7"],
+    ["t-n530766792","t","Lucha Libre Gourmet Taco Shop",32.74325,-117.18161,0,"1810 West Washington Street",""],
+    ["t-n12080407273","t","Lucha Libre Taco Shop",32.79745,-117.25099,0,"",""],
+    ["t-n5430490221","t","Lucha Libre Taco Shop",32.74861,-117.12968,0,"3016 University Avenue",""],
+    ["t-n12397845327","t","Lucy's taco shop",32.71655,-117.16402,0,"",""],
+    ["t-n4045548456","t","Lupita's Mexican Food",33.15598,-117.12944,0,"","Mo-Sa 10:00-18:30"],
+    ["t-n9366452594","t","Macho's Taco Shop",32.74755,-116.96061,0,"3757 Avocado Boulevard, La Mesa",""],
+    ["t-n596125337","t","Mananas Mexican Food",33.0409,-116.87138,0,"1151 Main Street, Ramona",""],
+    ["t-n8155074778","t","Marisco's De La Riviera",32.70903,-117.0865,0,"",""],
+    ["t-n13900126325","t","Mariscos & Birria El Prieto",32.59447,-117.06859,2,"3031 Main Street, Chula Vista",""],
+    ["t-n8916831777","t","Mariscos La Morena",32.75625,-117.09205,2,"4750 El Cajon Boulevard, San Diego","Mo-Su 10:00-19:00"],
+    ["t-n9408869085","t","Marlen's Taco Shop",32.71425,-117.00688,0,"8921 Jamacha Road, Spring Valley",""],
+    ["t-n7709004441","t","Mauricio's",32.83066,-117.13918,0,"5375 Kearny Villa Road, San Diego",""],
+    ["t-w97506224","t","Mawazo Kitchen",33.09706,-116.99976,0,"",""],
+    ["t-n8039112711","t","Maya's Gourmet Pizza",32.54677,-117.03308,0,"660 East San Ysidro Boulevard, San Ysidro",""],
+    ["t-n4049238959","t","Mexico Viejo",33.04508,-117.25719,0,"1465 Encinitas Boulevard, Encinitas",""],
+    ["t-n1429584701","t","Mike's Red Tacos",32.82158,-117.18359,0,"4310 Genesee Avenue, San Diego",""],
+    ["t-w31818773","t","Mike's Red Tacos",32.91683,-117.12732,0,"9089 Mira Mesa Boulevard, San Diego","Mo-Th,Su 11:00-23:00; Fr-Sa 11:00-00:00"],
+    ["t-n13793420101","t","Mike’s Red Tacos",32.7486,-117.20603,0,"3365 Rosecrans Street","Su-Th 11:00-23:00; Fr-Sa 11:00-00:00"],
+    ["t-n5732708127","t","Mike’s Taco Club",32.74762,-117.25201,0,"Newport Avenue, San Diego",""],
+    ["t-w1473763550","t","Mis Cuates Taco Shop",33.3652,-117.08439,0,"11194 Pala Mission Road, Pala","We-Mo 09:00-21:00"],
+    ["t-n2718318364","t","Mis Dos Gallos Taqueria, Fruit & Deli",32.7811,-116.96645,0,"1088 Estes Street",""],
+    ["t-n13939409461","t","Mister G Salsa",32.89675,-117.13767,0,"8680 Miralani Drive, San Diego",""],
+    ["t-n4041727984","t","Mr. Taco",33.13122,-117.1652,0,"",""],
+    ["t-n6399823387","t","Mrs Taco",33.21924,-117.22549,0,"",""],
+    ["t-w1454283349","t","Mucha Fruta taqueria y fruteria",32.74972,-117.091,0,"",""],
+    ["t-n8441651082","t","Nacho Taco Shop",33.1318,-117.20586,0,"",""],
+    ["t-n596781074","t","Nando's Taco Shop",32.74273,-117.02536,0,"8025 Broadway, Lemon Grove","07:00-22:00"],
+    ["t-n11914569857","t","Nico's Taco Shop",32.76873,-117.19947,0,"5151 Morena Place","Mo-Th 07:00-19:45; Fr-Sa 07:00-20:45; Su 09:00-14:15"],
+    ["t-n2184863603","t","Nico's Taco Shop",32.93883,-117.23192,0,"3860 Valley Centre Drive, San Diego","Su-We 06:00-22:00; Th-Sa 06:00-22:30"],
+    ["t-w1002520262","t","Ochoa's Mexican Food",32.79432,-116.94634,0,"1051 East Main Street, El Cajon",""],
+    ["t-n13135230013","t","Original Mariscos German",32.75442,-117.10063,2,"",""],
+    ["t-n596949998","t","Ortiz's Taco Shop",32.74053,-117.22903,0,"3704 Voltaire Street, San Diego",""],
+    ["t-w546280450","t","Oscar's Mexican Food",32.9548,-117.0558,1,"12711 Poway Road, Poway","24/7"],
+    ["t-n4254727468","t","Oscar's Mexican Seafood",32.80816,-117.26087,2,"703 Turquoise Street, San Diego","Su-Th 08:00-21:00; Fr-Sa 08:00-22:00"],
+    ["t-n4045081735","t","Pacific Taco Shop",33.13293,-117.11985,0,"",""],
+    ["t-n4064423807","t","Pala Taco Shop",33.33234,-117.16211,0,"",""],
+    ["t-n9203987320","t","Palomino's Mexican & Seafood",32.72639,-116.96914,2,"2615 Sweetwater Springs Boulevard, Spring Valley",""],
+    ["t-n9409191236","t","Palominos Mexican & Seafood",32.83077,-117.12787,2,"9353 Clairemont Mesa Boulevard, San Diego",""],
+    ["t-n3954300991","t","Pavlo's Tacos",33.04386,-117.25872,0,"",""],
+    ["t-n1250246907","t","Pedro's Tacos",33.37773,-117.25122,0,"",""],
+    ["t-w357558783","t","Pedro's Tacos",33.21436,-117.35685,0,"",""],
+    ["t-n8830801518","t","Picante Taqueria Mexican Grill",32.79354,-117.09818,0,"6620 Mission Gorge Road, San Diego","Mo-Su 10:00-21:00"],
+    ["t-w993792496","t","Poncho's Mexican & Sea Food",32.79468,-116.93792,0,"1279 East Main Street, El Cajon",""],
+    ["t-n596199257","t","Poncho's Mexican Food",32.74021,-116.94264,0,"2990 Jamacha Road, El Cajon",""],
+    ["t-n3327846711","t","Primos Mexican Food",32.77385,-117.07014,0,"",""],
+    ["t-w721088530","t","Ramberto's Taco Shop",32.71389,-117.013,1,"1039 Sweetwater Road, Spring Valley","24/7"],
+    ["t-n4045145351","t","Randolfo's Tacos",33.14105,-117.13891,0,"",""],
+    ["t-n9342264121","t","Rigoberto's",32.97775,-117.02389,0,"",""],
+    ["t-n13586462691","t","Rigoberto's Taco Shop",32.87987,-117.16173,1,"7094 Miramar Road, San Diego","24/7"],
+    ["t-n365355775","t","Rigoberto's Taco Shop",32.83722,-117.27803,0,"7345 La Jolla Boulevard, La Jolla",""],
+    ["t-w31839945","t","Rigoberto's Taco Shop",32.7985,-117.24847,0,"1190 Garnet Avenue, San Diego",""],
+    ["t-w402053651","t","Rigoberto's Taco Shop",33.13679,-117.13056,0,"1310 East Mission Road, San Marcos",""],
+    ["t-n9944351006","t","Robert's Jalapeños",32.98001,-117.07718,2,"11835 Carmel Mountain Road, San Diego","Mo-Sa 07:00-22:00; Su 07:30-21:30"],
+    ["t-w31803197","t","Robertacos",32.55602,-117.05525,0,"492 West San Ysidro Boulevard, San Ysidro",""],
+    ["t-w224702871","t","Roberto's",32.7498,-117.24242,0,"4770 Voltaire Street, San Diego",""],
+    ["t-n11486163835","t","Roberto's Taco Shop",32.99785,-117.27418,0,"",""],
+    ["t-n12191930602","t","Roberto's Taco Shop",32.7973,-117.19284,0,"3095 Clairemont Drive",""],
+    ["t-n2283437293","t","Roberto's Taco Shop",33.04623,-117.28252,0,"471 Encinitas Boulevard, Encinitas",""],
+    ["t-n353135502","t","Roberto's Taco Shop",32.7472,-117.16112,0,"420 Robinson Avenue, San Diego","Mo-We, Su 07:00-22:00; Th-Sa 07:00-24:00"],
+    ["t-w1172640314","t","Roberto's Taco Shop",32.85658,-116.92474,0,"12401 Woodside Avenue, Lakeside",""],
+    ["t-w31842692","t","Roberto's Taco Shop",32.72138,-117.23018,0,"1155 Scott Street, San Diego",""],
+    ["t-n4687993644","t","Roberto's Taco Shop RB",33.01803,-117.07368,0,"16773 Bernardo Center Drive, San Diego","Mo-Su 08:00-20:00"],
+    ["t-n9809662787","t","Rodrigo's Taco Shop",32.96132,-117.11393,0,"",""],
+    ["t-n4949993248","t","Rolberto's  Taco Shop",32.76355,-117.11864,0,"","Mo-Su 06:00-03:00"],
+    ["t-n13710150116","t","Rolberto's Taco Shop",32.7556,-117.10744,0,"",""],
+    ["t-n9414338723","t","Rolbertos",32.81064,-117.11617,0,"3755 Murphy Canyon Road, San Diego",""],
+    ["t-n10780254746","t","Rosarito's Mexican Food #2",32.85191,-116.93231,0,"9562 Winter Gardens Boulevard, Lakeside",""],
+    ["t-w957710398","t","Rosendo's Taco Shop",32.79982,-116.93144,0,"1408 East Main Street, El Cajon",""],
+    ["t-n3067766549","t","Rudy's Taco Shop",32.99036,-117.26073,0,"524 Stevens Avenue, Solana Beach","Mo-Sa 08:00-21:00; Su 08:00-20:00"],
+    ["t-n596428442","t","Ruribertos Mexican Food",32.77227,-117.25144,0,"3202 Mission Boulevard, San Diego",""],
+    ["t-w31803357","t","Saguaro's",32.74645,-117.12985,0,"3753 30th Street, San Diego",""],
+    ["t-w544907249","t","Salsa Mexican Food",32.95676,-117.04416,0,"13230 Poway Road, Poway",""],
+    ["t-n12193700091","t","Santa Anna Mexican Food",32.75634,-117.08884,0,"",""],
+    ["t-n365355784","t","Santana's Fresh MXN Food",32.78201,-117.20679,0,"",""],
+    ["t-w960979226","t","Santana's Mexican Grill",32.74829,-116.98454,0,"9824 Campo Road, Spring Valley",""],
+    ["t-w961157264","t","Sarai's Taco Shop",32.86235,-116.92167,0,"10143 Maine Avenue, Lakeside",""],
+    ["t-w959687880","t","Sarita's Taco Shop",32.74824,-116.98296,1,"9906 Campo Road, Spring Valley","24/7"],
+    ["t-n10003047516","t","Señor Burro",32.78654,-117.00378,0,"8960 Fletcher Parkway, La Mesa",""],
+    ["t-w31842085","t","Senor Panchos Fresh Mexican Grill",32.77051,-117.06949,0,"5089 College Avenue, San Diego",""],
+    ["t-n6469317786","t","Señor Tequero",32.94517,-117.08476,0,"",""],
+    ["t-n9289022993","t","Serrano's Mexican Food",32.9808,-117.06113,0,"14829 Pomerado Road, Poway",""],
+    ["t-w350398727","t","Serrano's Street Tacos & Bar",32.71485,-117.15898,0,"624 E Street","Tu-Th 12:00-23:00; Fr-Sa 12:00-02:00; Su 12:00-21:00"],
+    ["t-w994404266","t","Silva's Taco Shop",32.80796,-116.94831,0,"998 Broadway, El Cajon",""],
+    ["t-w959537897","t","Sombrero",32.78734,-116.92717,0,"1501 East Washington Avenue, El Cajon",""],
+    ["t-n10895328927","t","Sombrero Mexican Food",32.85704,-116.92589,0,"12346 Woodside Avenue, Lakeside",""],
+    ["t-n669237547","t","Sombrero Mexican Food",32.7759,-117.1446,0,"8590 Rio San Diego Drive, San Diego","Mo-Su 07:00-24:00"],
+    ["t-n7446961012","t","Sombrero Mexican Food",32.9775,-117.08286,0,"11040 Rancho Carmel Drive, San Diego","Mo-Sa 07:00-23:00; Su 08:00-23:00"],
+    ["t-n9206559781","t","Sombrero Mexican Food",32.70881,-117.01113,0,"691 Sweetwater Road, San Diego","Mo 07:00-16:00; Su,Tu-Th 07:00-21:00; Fr-Sa 07:00-22:00"],
+    ["t-n11979578305","t","Stars & Stripes Mexican Food",32.87727,-117.18616,0,"","Mo-We 05:00-21:00; Th,Fr 05:00-22:00; Sa 05:00-20:00"],
+    ["t-n12050571669","t","Super Sergio's",32.66181,-117.08252,0,"1631 Sweetwater Road",""],
+    ["t-n596151369","t","Taco Fiesta",32.78784,-117.09748,0,"6201 Mission Gorge Road, San Diego",""],
+    ["t-w1035022848","t","Taco Fiesta",32.74973,-117.08825,0,"4920 University Avenue, San Diego",""],
+    ["t-n6507154456","t","Taco Patron Mexican Grill",33.00501,-117.09092,0,"","Mo-Sa 07:00-19:00"],
+    ["t-n7234409185","t","Taco Surf",32.79885,-117.25611,2,"",""],
+    ["t-n7771798786","t","Taco Taco",32.95945,-117.04019,0,"13429 Community Road, Poway",""],
+    ["t-n12594339100","t","Taco Time Food Truck",32.78323,-117.17205,0,"","Mo-Su 18:00-23:30"],
+    ["t-n4670774478","t","Taco Villa",32.87692,-117.24002,0,"","Mo-Fr 08:00-18:00"],
+    ["t-n13945978077","t","Tacoman",32.66147,-117.09244,0,"2708 Highland Avenue, National City","Mo-Fr 10:00-18:00"],
+    ["t-n13969004801","t","Tacos El Flaco",32.75046,-117.14607,0,"",""],
+    ["t-n12918577579","t","Tacos El Franc",32.65586,-117.06521,0,"3030 Plaza Bonita Road, National City","Mo-Su 11:00-21:00"],
+    ["t-w959856796","t","Tacos El G",32.6679,-117.0951,0,"1940 Highland Avenue, National City",""],
+    ["t-w959567844","t","Tacos El Gallo",32.80161,-116.93549,0,"569 North 2nd Street, El Cajon",""],
+    ["t-n11043267924","t","Tacos El Gordo",32.71347,-117.15993,0,"",""],
+    ["t-w31802228","t","Tacos El Gordo",32.58355,-117.06294,0,"3265 Palm Avenue, San Diego","Mo-Fr 00:00-01:00,11:00-24:00; Sa,Su 00:00-02:00,11:00-24:00"],
+    ["t-w959856799","t","Tacos El Gordo",32.62902,-117.08908,0,"556 Broadway, Chula Vista","Su-Th 10:00-02:00; Fr-Sa 10:00-04:00"],
+    ["t-n7397354280","t","Tacos El Guero",32.56073,-117.0635,0,"2036 Dairy Mart Road, San Ysidro",""],
+    ["t-n8917290758","t","Tacos El Panson",32.75495,-117.09904,0,"4443 El Cajon Boulevard, San Diego","09:30-22:00"],
+    ["t-n9018472535","t","Tacos El Poblano",32.63638,-117.02372,0,"885 East H Street, Chula Vista","Mo-Su 10:00-22:00"],
+    ["t-n1824649691","t","Tacos El Portal",33.12868,-117.09004,0,"",""],
+    ["t-n8067297985","t","Tacos El Trompo",32.65253,-117.09193,0,"",""],
+    ["t-n13328811390","t","Tacos El Vaquero",32.72345,-117.22894,0,"1310 Scott Street, San Diego","Tu 12:00-24:00; We-Sa 00:00-01:00,12:00-24:00; Su 00:00-01:00"],
+    ["t-w959856786","t","Taqueria By El Prieto",32.63019,-117.09328,0,"689 H Street, Chula Vista","Mo-Su 11:00-21:00"],
+    ["t-n9215079107","t","Taquería Los Chuchys",32.711,-117.1609,0,"543 4th Avenue, San Diego",""],
+    ["t-n3271743264","t","Taqueria Los Corrales",32.75299,-117.20445,0,"",""],
+    ["t-n1364078883","t","Taqueria Morelos Mexican Food",33.12941,-117.06684,0,"",""],
+    ["t-n6531146967","t","Taqueria Revolucion",32.64836,-117.05937,0,"3001 Bonita Road, Chula Vista","Mo-Su 10:30-21:00"],
+    ["t-w31803181","t","Taqueria Revolucion",32.55062,-117.03833,0,"362 East San Ysidro Boulevard",""],
+    ["t-n8713898677","t","Teresitas Fruiteria",32.58473,-117.03862,0,"4370 Palm Avenue, San Diego","Mo-Su 07:00-23:00"],
+    ["t-n9247399844","t","The Burrito Factory",32.93389,-117.06078,0,"12265 Scripps Poway Parkway, Poway",""],
+    ["t-n13368213933","t","The Craft Taco",32.91275,-117.23179,0,"11585 Sorrento Valley Road, San Diego","Mo,Tu,We,Th,Sa 11:00-20:00; Fr 11:00-21:00; Su 11:00-17:00"],
+    ["t-n13376986759","t","The Craft Taco at The Nat",32.73208,-117.1473,0,"1788 El Prado, San Diego","Mo-Su 10:00-16:30"],
+    ["t-n12115577880","t","The Original Mr. Taco Vista",33.14606,-117.24231,0,"2215 South Melrose Dr, Vista","Mo 07:00-20:30; Tu-Th 07:00-21:30; Sa 08:00-22:00; Su 08:00-20:00"],
+    ["t-n11426654534","t","The Taco Stand",32.7177,-117.15863,0,"645 B Street, San Diego","Mo-Th 09:00-21:00; Fr 09:00-22:00; Sa 11:00-22:00; Su 11:00-20:00"],
+    ["t-n12128751006","t","The Taco Stand",32.82495,-117.15588,0,"4646 Convoy Street, San Diego","Mo-Th, Su 10:00-22:00; Fr-Sa 10:00-24:00"],
+    ["t-n13145103788","t","The Taco Stand",32.73131,-117.19284,0,"",""],
+    ["t-n5430493621","t","The Taco Stand",32.74125,-117.12962,0,"3000 #105 Upas Street",""],
+    ["t-n6722520087","t","The Taco Stand",32.83937,-117.2768,0,"621 Pearl Street, La Jolla","Mo-Th, Su 09:00-21:00; Fr, Sa 09:00-22:00"],
+    ["t-w100404107","t","TJ Tacos",33.12832,-117.07251,0,"802 East Valley Parkway, Escondido",""],
+    ["t-n9408869022","t","Tlaxcala Hectoir's Taco Shop",32.71351,-117.01639,0,"Elkelton Boulevard, Spring Valley",""],
+    ["t-n13384025712","t","Topo's Tacos",32.71051,-117.05673,0,"",""],
+    ["t-n596820583","t","Trujillo's Taco Shop",32.7712,-117.06959,0,"5120 Cantina Way, San Diego",""],
+    ["t-w545144541","t","Trujillo's Taco Shop",32.76582,-117.0602,0,"6450 El Cajon Boulevard, San Diego","08:00-24:00; 00:00-03:00"],
+    ["t-w31803427","t","Tulum Seafood",32.91164,-117.14355,2,"10631 Camino Ruiz, San Diego","Mo-Su 09:00-21:00"],
+    ["t-n6357267192","t","Tutu Taco",32.60389,-117.05133,0,"",""],
+    ["t-n9443729914","t","Valentinas Taco Shop",32.56907,-117.00463,0,"6051 Business Center Court, San Diego","Mo-Fr 07:00-18:00, Sa 08:00-14:00"],
+    ["t-n1011332086","t","Valerie's Taco Shop",33.20942,-117.31219,0,"",""],
+    ["t-n6720075159","t","Valerie’s Taco Shop",33.10501,-117.26616,0,"6986 El Camino Real","Mo-Sa 07:00-22:00; Su 07:00-15:00"],
+    ["t-w31817341","t","Vallarta Express",32.91675,-117.12427,0,"9313 Mira Mesa Boulevard, San Diego",""],
+    ["t-w688368721","t","Vallarta Express",32.77691,-117.01648,1,"5341 Jackson Drive, La Mesa","24/7"],
+    ["t-w913387313","t","Vallarta Express",33.16253,-117.34481,0,"2952 Harding Street, Carlsbad",""],
+    ["t-n654005566","t","Vallerta Express",32.82134,-117.18257,0,"",""],
+    ["t-w993796388","t","Victoria Mexican Food",32.79474,-116.95471,0,"677 East Main Street, El Cajon",""],
+    ["t-n8703595240","t","Victoria's Mexican Grill",32.57672,-117.09246,0,"1912 Coronado Avenue, San Diego","Mo-Su 11:00-23:00"],
+    ["t-w1178512215","t","Wings Mix",32.82631,-116.93331,0,"8215 Winter Gardens Boulevard, Lakeside",""],
+  ];
+  /* POI-DATA:END */
+
+  // Nearest neighborhood center, used as each spot's "area" for grouping and dimming.
+  function nearestHood(lat, lon) {
+    const k = Math.cos((lat * Math.PI) / 180);
+    let best = NEIGHBORHOODS[0];
+    let bestD = Infinity;
+    for (const n of NEIGHBORHOODS) {
+      const d = (n.lat - lat) ** 2 + ((n.lon - lon) * k) ** 2;
+      if (d < bestD) { bestD = d; best = n; }
+    }
+    return best.id;
+  }
+
+  // Hazy-IPA has no OpenStreetMap source, so it stays SIMULATED: a stable hash marks ~40%.
+  function simulatedHazy(id) {
+    let h = 2166136261;
+    for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0) % 10 < 4;
+  }
+
+  // Row: [id, 'b'|'t', name, lat, lon, flags (1 = 24/7, 2 = seafood), address, opening_hours]
+  const LANDMARKS = POI_ROWS.map(([id, t, name, lat, lon, flags, addr, hours]) => ({
+    id, name, lat, lon, addr, hours,
+    type: t === 'b' ? 'brewery' : 'taco',
+    hood: nearestHood(lat, lon),
+    tags: {
+      hazyIPA: t === 'b' && simulatedHazy(id),
+      open247: t === 't' && (flags & 1) === 1,
+      bajaFish: t === 't' && (flags & 2) === 2,
+    },
+  }));
+
+  // Coastline (N -> S) as [lat, lon, maxInlandDepthDeg]. Depth is how far the marine
+  // layer pushes east at full strength; valleys (Mission Valley, the bay) get deeper.
+  const COASTLINE = [
+    [33.200, -117.390, 0.07], [33.160, -117.355, 0.07], [33.100, -117.322, 0.075],
+    [33.050, -117.300, 0.08], [33.000, -117.280, 0.09], [32.960, -117.272, 0.10],
+    [32.920, -117.258, 0.10], [32.880, -117.252, 0.09], [32.857, -117.258, 0.085],
+    [32.845, -117.280, 0.10], [32.820, -117.282, 0.12], [32.800, -117.262, 0.15],
+    [32.770, -117.254, 0.19], [32.750, -117.256, 0.17], [32.720, -117.258, 0.16],
+    [32.672, -117.242, 0.17], [32.668, -117.190, 0.15], [32.640, -117.152, 0.12],
+    [32.600, -117.138, 0.10], [32.565, -117.131, 0.09], [32.535, -117.125, 0.08],
+  ];
+
+  // Zone profiles. `band` is the 6 AM - 10 PM envelope; nights dip below it.
+  const ZONES = {
+    coastal:  { label: 'Coastal',         band: [66, 74], peak: 13.5, sharp: false, eve: 0.35, nightDrop: 3, rh: [74, 92] },
+    central:  { label: 'Central / South', band: [72, 82], peak: 14.5, sharp: false, eve: 0.30, nightDrop: 5, rh: [52, 72] },
+    inland:   { label: 'Inland',          band: [82, 98], peak: 14.5, sharp: true,  eve: 0.15, nightDrop: 8, rh: [18, 48] },
+    mountain: { label: 'Mountain',        band: [60, 84], peak: 14.0, sharp: false, eve: 0.20, nightDrop: 9, rh: [24, 50] },
+  };
+
+  // ------------------------------------------------------------------ math
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const smoothstep = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
+  const smootherstep = (t) => { t = clamp(t, 0, 1); return t * t * t * (t * (t * 6 - 15) + 10); };
+  const wrapHour = (h) => ((h % 24) + 24) % 24;
+
+  function zoneOf(zone) {
+    const z = ZONES[zone];
+    if (!z) throw new Error('unknown zone: ' + zone);
+    return z;
+  }
+
+  // 0..1 "how far toward the afternoon peak" inside the 6-22 window.
+  function dayLevel(z, h) {
+    if (h <= z.peak) {
+      const u = (h - 6) / (z.peak - 6);
+      return z.sharp ? smootherstep(u) : smoothstep(u);
+    }
+    const u = (h - z.peak) / (22 - z.peak);
+    return z.eve + (1 - z.eve) * (1 - smoothstep(u));
+  }
+
+  function tempAt(zone, hour, offset = 0) {
+    const z = zoneOf(zone);
+    const [lo, hi] = z.band;
+    const h = wrapHour(hour);
+    if (h >= 6 && h <= 22) return clamp(lo + (hi - lo) * dayLevel(z, h) + offset, lo, hi);
+    const t22 = lo + (hi - lo) * z.eve;
+    const tMin = lo - z.nightDrop;
+    // Cool from 10 PM to a 3 AM low, then ease back up to the band floor by 6 AM.
+    const hh = h < 6 ? h + 24 : h; // 22..30
+    const t = hh <= 27 ? lerp(t22, tMin, smoothstep((hh - 22) / 5)) : lerp(tMin, lo, smoothstep((hh - 27) / 3));
+    return t + offset;
+  }
+
+  function fogFactor(hour) {
+    const h = wrapHour(hour);
+    if (h >= 5 && h <= 11) return 1;
+    if (h > 11 && h < 14.5) return 1 - smoothstep((h - 11) / 3.5);
+    if (h >= 14.5 && h <= 19) return 0;
+    if (h > 19 && h <= 22) return 0.85 * smoothstep((h - 19) / 3);
+    if (h > 22) return 0.85 + 0.15 * smoothstep((h - 22) / 2);
+    return 1; // 0..5
+  }
+
+  function humidityAt(zone, hour) {
+    const z = zoneOf(zone);
+    const h = wrapHour(hour);
+    const [mn, mx] = z.rh;
+    const base = h >= 6 && h <= 22 ? mx - (mx - mn) * dayLevel(z, h) : mx;
+    const fogBump = zone === 'coastal' ? 4 * fogFactor(h) : 0;
+    return clamp(base + fogBump, 0, 99);
+  }
+
+  function zoneCurve24(zone) {
+    return Array.from({ length: 24 }, (_, h) => Math.round(tempAt(zone, h, 0) * 10) / 10);
+  }
+
+  // ------------------------------------------------------------------ geo
+  const EARTH_MI = 3958.8;
+  const WALK_MPH = 3;
+  const ROUTE_FACTOR = 1.25; // street grid vs. straight line
+
+  function haversineMi(a, b) {
+    const toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLon = toRad(b.lon - a.lon);
+    const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+    return 2 * EARTH_MI * Math.asin(Math.min(1, Math.sqrt(s)));
+  }
+
+  const walkMinutes = (miles) => Math.round(((miles * ROUTE_FACTOR) / WALK_MPH) * 60);
+
+  const CRAWL_RADIUS_MI = 1.5;
+
+  function nearestTacos(brewery, pois, { max = 3, radiusMi = CRAWL_RADIUS_MI } = {}) {
+    return pois
+      .filter((p) => p.type === 'taco')
+      .map((p) => ({ poi: p, miles: haversineMi(brewery, p) }))
+      .filter((r) => r.miles <= radiusMi)
+      .sort((a, b) => a.miles - b.miles)
+      .slice(0, max)
+      .map((r) => ({ ...r, minutes: walkMinutes(r.miles) }));
+  }
+
+  // Hazy narrows breweries; 24/7 + Baja narrow taco shops. Crawlable then keeps only spots
+  // with the other type within walking range, judged against what the other filters left.
+  function applyFilters(pois, flags = {}) {
+    const tagged = pois.filter((p) => {
+      if (p.type === 'brewery' && flags.hazyIPA && !p.tags.hazyIPA) return false;
+      if (p.type === 'taco' && flags.open247 && !p.tags.open247) return false;
+      if (p.type === 'taco' && flags.bajaFish && !p.tags.bajaFish) return false;
+      return true;
+    });
+    if (!flags.crawlable) return tagged;
+    return tagged.filter((p) => tagged.some((q) => q.type !== p.type && haversineMi(p, q) <= CRAWL_RADIUS_MI));
+  }
+
+  // ------------------------------------------------------------------ events + registry
+  class EventBus {
+    constructor() { this._handlers = new Map(); this._last = new Map(); }
+    // Latest payload for an event, so a module that subscribes late can sync immediately.
+    last(evt) { return this._last.get(evt); }
+    on(evt, fn) {
+      if (!this._handlers.has(evt)) this._handlers.set(evt, new Set());
+      this._handlers.get(evt).add(fn);
+      return () => this.off(evt, fn);
+    }
+    off(evt, fn) { this._handlers.get(evt)?.delete(fn); }
+    emit(evt, ...args) {
+      this._last.set(evt, args[0]);
+      for (const fn of [...(this._handlers.get(evt) || [])]) {
+        try { fn(...args); } catch (err) { console.error('[SDX] handler for "' + evt + '" failed', err); }
+      }
+    }
+  }
+
+  const OPTIONAL_HOOKS = ['createState', 'onDeactivate', 'onStateChange', 'onFrame', 'onFocus', 'onBlur', 'renderControls', 'renderSidebar', 'legend', 'bounds'];
+
+  class ModuleRegistry extends EventBus {
+    constructor() { super(); this._modules = []; }
+
+    registerModule(def) {
+      if (!def || typeof def !== 'object') throw new TypeError('module definition must be an object');
+      if (typeof def.id !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(def.id)) throw new TypeError('module id must be a kebab-case string');
+      if (typeof def.name !== 'string' || !def.name.trim()) throw new TypeError('module "' + def.id + '" needs a name');
+      if (typeof def.onActivate !== 'function') throw new TypeError('module "' + def.id + '" needs an onActivate(ctx) function');
+      for (const k of OPTIONAL_HOOKS) {
+        if (def[k] != null && typeof def[k] !== 'function') throw new TypeError('module "' + def.id + '": ' + k + ' must be a function');
+      }
+      if (this.get(def.id)) throw new Error('duplicate module id "' + def.id + '"');
+      const mod = Object.freeze({ icon: 'layers', accent: '#94a3b8', description: '', ...def });
+      this._modules.push(mod);
+      this.emit('registered', mod);
+      return mod;
+    }
+
+    list() { return this._modules.slice(); }
+    get(id) { return this._modules.find((m) => m.id === id); }
+  }
+
+  const LayerRegistry = new ModuleRegistry();
+
+  root.SDX = {
+    DATA: { neighborhoods: NEIGHBORHOODS, landmarks: LANDMARKS, coastline: COASTLINE },
+    ZONES,
+    math: { clamp, lerp, smoothstep, smootherstep, wrapHour },
+    climate: { tempAt, humidityAt, fogFactor, zoneCurve24 },
+    geo: { haversineMi, walkMinutes, WALK_MPH, ROUTE_FACTOR },
+    crawl: { nearestTacos, RADIUS_MI: CRAWL_RADIUS_MI },
+    filters: { applyFilters },
+    EventBus,
+    ModuleRegistry,
+    LayerRegistry,
+  };
+  root.LayerRegistry = LayerRegistry;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+
+<!-- =====================================================================
+     APP: Leaflet + Chart.js + DOM. Core shell + modules.
+     ===================================================================== -->
+<script id="sdx-app">
+(function () {
+  'use strict';
+  const { SDX, L, Chart, LayerRegistry } = window;
+  const { clamp, smoothstep } = SDX.math;
+
+  // ==================================================================
+  // UTILITIES
+  // ==================================================================
+  const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const motion = () => !REDUCED.matches;
+
+  const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
+
+  function h(tag, attrs = {}, html = '') {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v === false || v == null) continue;
+      if (k === 'class') el.className = v;
+      else if (k === 'style') el.style.cssText = v;
+      else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v === true ? '' : v);
+    }
+    if (html) el.innerHTML = html;
+    return el;
+  }
+  const icon = (name, cls = '') => `<i data-lucide="${name}" class="${cls}"></i>`;
+  const paintIcons = () => { if (window.lucide) window.lucide.createIcons({ attrs: { 'stroke-width': 1.75 } }); };
+
+  function fmtHour(hour) {
+    const mins = Math.round(SDX.math.wrapHour(hour) * 60) % (24 * 60);
+    const H = Math.floor(mins / 60);
+    const M = mins % 60;
+    return `${H % 12 === 0 ? 12 : H % 12}:${String(M).padStart(2, '0')} ${H < 12 ? 'AM' : 'PM'}`;
+  }
+  const hourTick = (v) => (v === 0 ? '12a' : v === 12 ? '12p' : v < 12 ? v + 'a' : v - 12 + 'p');
+  const fmtMi = (mi) => (mi < 0.1 ? '<0.1' : mi.toFixed(1)) + ' mi';
+
+  // Diverging temperature ramp: blue (cool) <-> neutral (~76F) <-> red (hot).
+  const HEAT = [[60, [57, 111, 208]], [68, [109, 167, 236]], [76, [195, 194, 183]], [86, [236, 131, 90]], [98, [227, 73, 72]]];
+  function heatColor(t) {
+    if (t <= HEAT[0][0]) return `rgb(${HEAT[0][1].join(',')})`;
+    for (let i = 1; i < HEAT.length; i++) {
+      const [t1, c1] = HEAT[i];
+      if (t <= t1) {
+        const [t0, c0] = HEAT[i - 1];
+        const k = (t - t0) / (t1 - t0);
+        return `rgb(${c0.map((c, j) => Math.round(c + (c1[j] - c) * k)).join(',')})`;
+      }
+    }
+    return `rgb(${HEAT[HEAT.length - 1][1].join(',')})`;
+  }
+
+  // Tween a number inside an element (count up / down).
+  function tweenNumber(el, to, { dur = 650, fmt = (v) => Math.round(v) } = {}) {
+    if (!el) return;
+    const from = el._v ?? to;
+    el._v = to;
+    cancelAnimationFrame(el._raf);
+    if (!motion() || from === to) { el.textContent = fmt(to); return; }
+    const t0 = performance.now();
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / dur);
+      const e = 1 - Math.pow(1 - k, 3);
+      el.textContent = fmt(from + (to - from) * e);
+      if (k < 1) el._raf = requestAnimationFrame(step);
+    };
+    el._raf = requestAnimationFrame(step);
+  }
+
+  const UTIL = { esc, h, icon, paintIcons, fmtHour, hourTick, fmtMi, heatColor, tweenNumber, motion };
+
+  // Chart.js look shared by every module.
+  Chart.defaults.font.family = 'Inter, sans-serif';
+  Chart.defaults.color = '#8a97aa';
+  Chart.defaults.borderColor = 'rgba(148,163,184,.08)';
+  const TOOLTIP = {
+    backgroundColor: 'rgba(9,13,24,.95)', borderColor: 'rgba(148,163,184,.22)', borderWidth: 1,
+    padding: 10, cornerRadius: 10, caretSize: 5, boxPadding: 4, usePointStyle: true,
+    titleFont: { family: 'JetBrains Mono', size: 11, weight: '600' }, bodyFont: { family: 'Inter', size: 12 },
+    titleColor: '#e6edf7', bodyColor: '#c9d3e0',
+  };
+  UTIL.TOOLTIP = TOOLTIP;
+
+  // ==================================================================
+  // CORE: ModuleHost wraps one registered module; App is the shell.
+  // Core never references a specific module id.
+  // ==================================================================
+  const RENDER_HOOKS = new Set(['renderControls', 'renderSidebar']);
+
+  // Basemaps. CARTO Dark Matter needs a free per-person API key (since 23 Sep 2026);
+  // without one we fall back to OSM standard tiles darkened with a CSS filter.
+  const CARTO_KEY_STORE = 'sdx.cartoKey';
+  const ATTR_OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+  const BASEMAPS = {
+    carto: (key) => ({
+      label: 'CARTO Dark Matter',
+      url: `https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=${encodeURIComponent(key)}`,
+      options: { maxZoom: 20, attribution: `${ATTR_OSM} &copy; <a href="https://carto.com/attributions">CARTO</a>` },
+    }),
+    osm: () => ({
+      label: 'OpenStreetMap (dimmed fallback)',
+      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      options: { maxZoom: 19, className: 'tiles-osm-dark', attribution: ATTR_OSM },
+    }),
+  };
+  const readKey = () => { try { return localStorage.getItem(CARTO_KEY_STORE) || ''; } catch { return ''; } };
+  const writeKey = (k) => { try { if (k) localStorage.setItem(CARTO_KEY_STORE, k); else localStorage.removeItem(CARTO_KEY_STORE); } catch { /* storage blocked */ } };
+
+  class ModuleHost {
+    constructor(def, app) {
+      this.def = def;
+      this.app = app;
+      this.active = false;
+      this.charts = new Set();
+      this.layer = L.layerGroup();
+      this.removeTimer = null;
+      this.state = typeof def.createState === 'function' ? def.createState() : {};
+      const host = this;
+      this.ctx = {
+        id: def.id, accent: def.accent, map: app.map, L, SDX, data: SDX.DATA, util: UTIL, bus: app.bus,
+        layer: this.layer, ui: {}, motion,
+        get state() { return host.state; },
+        setState(patch) {
+          const prev = host.state;
+          const next = typeof patch === 'function' ? patch(prev) : patch;
+          host.state = { ...prev, ...next };
+          host.call('onStateChange', prev);
+          app.refreshLegend();
+        },
+        chart(canvas, config) { const c = new Chart(canvas, config); host.charts.add(c); return c; },
+        isFocused: () => app.focusedId === def.id,
+        toast: (msg) => app.toast(msg),
+        flyTo: (bounds, opts) => app.flyTo(bounds, opts),
+      };
+    }
+
+    // Render hooks take (el, ctx); every other hook takes (ctx, ...args).
+    call(hook, ...args) {
+      const fn = this.def[hook];
+      if (typeof fn !== 'function') return undefined;
+      const argv = RENDER_HOOKS.has(hook) ? [args[0], this.ctx, ...args.slice(1)] : [this.ctx, ...args];
+      try {
+        return fn.apply(this.def, argv);
+      } catch (err) {
+        console.error(`[SDX:${this.def.id}] ${hook} failed`, err);
+        if (hook !== 'onFrame') this.app.toast(`${this.def.name}: ${hook} failed`);
+        return undefined;
+      }
+    }
+
+    disposeUI() {
+      for (const c of this.charts) c.destroy();
+      this.charts.clear();
+      this.ctx.ui = {};
+    }
+  }
+
+  function markLeaving(group) {
+    group.eachLayer((l) => {
+      if (l instanceof L.LayerGroup) return markLeaving(l);
+      const el = l.getElement && l.getElement();
+      if (el) el.classList.add('sdx-leave');
+    });
+  }
+
+  class App {
+    constructor() {
+      this.bus = new SDX.EventBus();
+      this.hosts = new Map();
+      this.activeIds = [];
+      this.focusedId = null;
+      this.chipEls = new Map();
+      this.swapToken = 0;
+      this.booted = false;
+      this.lastT = null;
+      this.lastLegend = '';
+
+      this.map = L.map('map', {
+        zoomControl: false, zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 110,
+        minZoom: 8.5, maxBounds: [[31.9, -118.4], [33.9, -115.8]], maxBoundsViscosity: 0.85,
+      }).setView([32.86, -117.02], 9.5);
+      L.control.zoom({ position: 'topright' }).addTo(this.map);
+      this.map.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>');
+      this.tiles = null;
+      this.setBasemap(readKey());
+      this.map.on('zoomend', () => this.map.getContainer().classList.toggle('zoom-near', this.map.getZoom() >= 11.5));
+
+      const $ = (id) => document.getElementById(id);
+      this.chips = $('chips');
+      this.chipInd = $('chip-ind');
+      this.dockTabs = $('dock-tabs');
+      this.dockBody = $('dock-body');
+      this.sidebar = $('sidebar');
+      this.sbTitle = $('sb-title');
+      this.sbBody = $('sb-body');
+      this.sbToggle = $('sb-toggle');
+      this.legend = $('legend-stack');
+      this.toastEl = $('toast');
+
+      this.sbToggle.addEventListener('click', () => this.setSidebar(!this.sidebarOpen));
+      $('sb-close').addEventListener('click', () => this.setSidebar(false));
+      window.addEventListener('resize', () => this.positionIndicator());
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (!this.bmPop.hidden) this.toggleBasemapPop(false);
+        else if (this.sidebarOpen && innerWidth < 900) this.setSidebar(false);
+      });
+
+      // Basemap key popover
+      this.bmBtn = $('bm-toggle');
+      this.bmPop = $('bm-pop');
+      this.bmKey = $('bm-key');
+      this.bmBtn.addEventListener('click', (e) => { e.stopPropagation(); this.toggleBasemapPop(this.bmPop.hidden); });
+      this.bmPop.addEventListener('click', (e) => e.stopPropagation());
+      document.addEventListener('click', () => this.toggleBasemapPop(false));
+      $('bm-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const key = this.bmKey.value.trim();
+        if (!/^[A-Za-z0-9._~-]{8,256}$/.test(key)) { this.toast("That doesn't look like a CARTO key"); return; }
+        writeKey(key);
+        this.setBasemap(key);
+        this.toggleBasemapPop(false);
+        this.toast('CARTO Dark Matter basemap on');
+      });
+      $('bm-clear').addEventListener('click', () => {
+        writeKey('');
+        this.bmKey.value = '';
+        this.setBasemap('');
+        this.toast('Using the OpenStreetMap fallback basemap');
+      });
+    }
+
+    setBasemap(key) {
+      const spec = key ? BASEMAPS.carto(key) : BASEMAPS.osm();
+      const old = this.tiles;
+      this.tiles = L.tileLayer(spec.url, spec.options).addTo(this.map);
+      this.tiles.bringToBack();
+      if (old) {
+        let done = false;
+        const drop = () => { if (!done) { done = true; this.map.removeLayer(old); } };
+        this.tiles.once('load', drop);
+        setTimeout(drop, 2500);
+      }
+      this.basemapLabel = spec.label;
+      const status = document.getElementById('bm-status');
+      if (status) status.textContent = `Now showing: ${spec.label}`;
+      document.body.classList.toggle('needs-key', !key);
+    }
+
+    toggleBasemapPop(open) {
+      if (open === !this.bmPop.hidden) return;
+      this.bmPop.hidden = !open;
+      this.bmBtn.setAttribute('aria-expanded', String(open));
+      if (open) { this.bmKey.value = readKey(); setTimeout(() => this.bmKey.focus(), 60); }
+    }
+
+    boot() {
+      LayerRegistry.list().forEach((def) => this.addModule(def));
+      LayerRegistry.on('registered', (def) => this.addModule(def)); // late registrations get a chip too
+      this.setSidebar(window.innerWidth >= 900);
+      const first = LayerRegistry.list()[0];
+      if (first) this.activate(first.id);
+      this.booted = true;
+      paintIcons();
+      requestAnimationFrame(this.tick);
+      if (document.fonts) document.fonts.ready.then(() => this.positionIndicator());
+    }
+
+    tick = (t) => {
+      const dt = this.lastT == null ? 16 : Math.min(64, t - this.lastT);
+      this.lastT = t;
+      for (const id of this.activeIds) this.hosts.get(id).call('onFrame', dt, t);
+      requestAnimationFrame(this.tick);
+    };
+
+    addModule(def) {
+      if (this.hosts.has(def.id)) return;
+      this.hosts.set(def.id, new ModuleHost(def, this));
+      const chip = h('button', {
+        class: 'chip', type: 'button', 'data-module': def.id, 'aria-pressed': 'false',
+        style: `--accent:${def.accent}`, title: `${def.description}\nClick: show / focus · click again: hide`,
+        onclick: () => this.onChip(def.id),
+      }, `<span class="led"></span>${icon(def.icon)}<span>${esc(def.name)}</span>`);
+      this.chips.append(chip);
+      this.chipEls.set(def.id, chip);
+      paintIcons();
+    }
+
+    onChip(id) {
+      const host = this.hosts.get(id);
+      if (!host.active) this.activate(id);
+      else if (this.focusedId === id) this.deactivate(id);
+      else this.focus(id);
+    }
+
+    activate(id, { fly = true } = {}) {
+      const host = this.hosts.get(id);
+      if (!host || host.active) return;
+      if (host.removeTimer) { clearTimeout(host.removeTimer); host.removeTimer = null; host.layer.clearLayers(); }
+      host.active = true;
+      this.activeIds.push(id);
+      host.layer.addTo(this.map);
+      host.call('onActivate');
+      this.focus(id);
+      this.refreshLegend();
+      if (fly) this.flyTo(host.call('bounds'));
+    }
+
+    deactivate(id) {
+      const host = this.hosts.get(id);
+      if (!host || !host.active) return;
+      host.active = false;
+      this.activeIds = this.activeIds.filter((x) => x !== id);
+      host.call('onDeactivate');
+      const finish = () => { host.layer.clearLayers(); this.map.removeLayer(host.layer); host.removeTimer = null; };
+      if (motion()) { markLeaving(host.layer); host.removeTimer = setTimeout(finish, 320); } else finish();
+      if (this.focusedId === id) this.focus(this.activeIds[this.activeIds.length - 1] ?? null);
+      else { this.updateChips(); this.renderDockTabs(); }
+      this.refreshLegend();
+    }
+
+    focus(id) {
+      const same = id === this.focusedId && this.booted;
+      const prevHost = this.hosts.get(this.focusedId);
+      this.focusedId = id;
+      this.updateChips();
+      this.renderDockTabs();
+      if (same) return;
+      // Focus-only visuals (e.g. the marine layer) toggle here, before the UI swap.
+      if (prevHost && prevHost.active) prevHost.call('onBlur');
+      const nextHost = this.hosts.get(id);
+      if (nextHost && nextHost.active) nextHost.call('onFocus');
+      this.refreshLegend();
+      const token = ++this.swapToken;
+      const build = () => {
+        if (token !== this.swapToken) return;
+        for (const hst of this.hosts.values()) hst.disposeUI();
+        const host = id ? this.hosts.get(id) : null;
+        this.dockBody.replaceChildren();
+        this.sbBody.replaceChildren();
+        if (!host) {
+          this.sbTitle.innerHTML = `<div class="sb-badge" style="--accent:#94a3b8">${icon('layers')}</div><div><div class="sb-title">No layers on</div><div class="sb-desc">Pick a layer in the top bar</div></div>`;
+          const empty = `<div class="empty">${icon('layers')}Pick a layer in the top bar to start exploring.</div>`;
+          this.dockBody.innerHTML = empty;
+          this.sbBody.innerHTML = empty;
+        } else {
+          const d = host.def;
+          this.sbTitle.innerHTML = `<div class="sb-badge" style="--accent:${d.accent}">${icon(d.icon)}</div><div class="min-w-0"><div class="sb-title">${esc(d.name)}</div><div class="sb-desc">${esc(d.description)}</div></div>`;
+          const controls = h('div', { class: 'enter' });
+          const side = h('div', { class: 'enter' });
+          this.dockBody.append(controls);
+          this.sbBody.append(side);
+          host.call('renderControls', controls);
+          host.call('renderSidebar', side);
+        }
+        paintIcons();
+        this.dockBody.classList.remove('is-out');
+        this.sbBody.classList.remove('is-out');
+      };
+      if (motion() && this.booted) {
+        this.dockBody.classList.add('is-out');
+        this.sbBody.classList.add('is-out');
+        setTimeout(build, 170);
+      } else build();
+    }
+
+    updateChips() {
+      for (const [id, el] of this.chipEls) {
+        const host = this.hosts.get(id);
+        el.classList.toggle('is-active', host.active);
+        el.classList.toggle('is-focused', id === this.focusedId);
+        el.setAttribute('aria-pressed', String(host.active));
+      }
+      this.positionIndicator();
+    }
+
+    positionIndicator() {
+      const chip = this.chipEls.get(this.focusedId);
+      if (!chip) { this.chipInd.style.opacity = '0'; return; }
+      const def = this.hosts.get(this.focusedId).def;
+      this.chipInd.style.opacity = '1';
+      this.chipInd.style.width = chip.offsetWidth + 'px';
+      this.chipInd.style.transform = `translateX(${chip.offsetLeft}px)`;
+      this.chipInd.style.setProperty('--ind-accent', def.accent);
+    }
+
+    renderDockTabs() {
+      const ids = this.activeIds;
+      this.dockTabs.hidden = ids.length < 2;
+      this.dockTabs.replaceChildren(...ids.map((id) => {
+        const d = this.hosts.get(id).def;
+        const on = id === this.focusedId;
+        return h('button', {
+          class: 'dtab' + (on ? ' is-on' : ''), type: 'button', role: 'tab', 'aria-selected': String(on),
+          style: `--accent:${d.accent}`, onclick: () => this.focus(id),
+        }, `${icon(d.icon)}<span>${esc(d.name)}</span>`);
+      }));
+      paintIcons();
+    }
+
+    refreshLegend() {
+      const html = this.activeIds.map((id) => {
+        const host = this.hosts.get(id);
+        const inner = host.call('legend');
+        return inner ? `<div class="lg-card sdx-glass" style="--accent:${host.def.accent}">${inner}</div>` : '';
+      }).join('');
+      if (html === this.lastLegend) return;
+      this.lastLegend = html;
+      this.legend.innerHTML = html;
+    }
+
+    setSidebar(open) {
+      this.sidebarOpen = open;
+      document.body.classList.toggle('sb-open', open);
+      this.sbToggle.setAttribute('aria-expanded', String(open));
+      if (open) this.sidebar.removeAttribute('inert'); else this.sidebar.setAttribute('inert', '');
+    }
+
+    flyTo(bounds, opts = {}) {
+      if (!bounds || !bounds.isValid || !bounds.isValid()) return;
+      const wide = window.innerWidth >= 900;
+      // Keep data clear of the sidebar (right) and the dock (bottom-left), measured live.
+      const sideW = wide && this.sidebarOpen ? this.sidebar.offsetWidth + 28 : 16;
+      const dockH = document.getElementById('dock').offsetHeight + 24;
+      const legendW = this.legend.offsetWidth ? this.legend.offsetWidth + 28 : 40;
+      const fit = {
+        paddingTopLeft: [(wide ? legendW : 16) + (opts.padLeft ?? 0), wide ? 96 : 150],
+        paddingBottomRight: [sideW + (opts.padRight ?? 0), dockH],
+        maxZoom: opts.maxZoom ?? 12.5,
+      };
+      if (motion()) this.map.flyToBounds(bounds, { ...fit, duration: opts.duration ?? 1.2, easeLinearity: 0.2 });
+      else this.map.fitBounds(bounds, { ...fit, animate: false });
+    }
+
+    toast(msg) {
+      this.toastEl.textContent = msg;
+      this.toastEl.classList.add('is-on');
+      clearTimeout(this.toastTimer);
+      this.toastTimer = setTimeout(() => this.toastEl.classList.remove('is-on'), 2800);
+    }
+  }
+
+  // ==================================================================
+  // MODULE 1: Microclimates & Marine Layer
+  // ==================================================================
+  const Microclimates = (() => {
+    const C = SDX.climate;
+    const SERIES = [
+      { zone: 'coastal', color: '#3987e5' },
+      { zone: 'inland', color: '#d95926' },
+      { zone: 'mountain', color: '#199e70' },
+    ];
+    const ZONE_COLOR = { coastal: '#3987e5', central: '#a8a79c', inland: '#d95926', mountain: '#199e70' };
+    const PLAY_HOURS_PER_MS = 16 / 20000; // 6 AM -> 10 PM in ~20 s
+
+    let pins = [];          // { n, m, root, tEl, lastT, lastC }
+    let fogBase = null;
+    let fogTex = null;
+    let ambient = null;
+    let onMapMove = null;
+    let onPopupOpen = null;
+    let onPopupClose = null;
+    let openPin = null;
+    let display = null;     // eased hour actually drawn
+    let lastFog = -1;
+    let lastClock = -1;
+    let lastPhase = '';
+
+    function fogRings(f, inner) {
+      const off = [];
+      const inl = [];
+      for (const [lat, lon, depth] of SDX.DATA.coastline) {
+        off.push([lat, lon - (0.05 + 0.13 * f) - (inner ? 0.015 : 0)]);
+        inl.push([lat, lon + depth * f * (inner ? 0.8 : 1)]);
+      }
+      return off.concat(inl.reverse());
+    }
+
+    function ambientWeights(hr) {
+      const bump = (x, a, b, c) => (x <= a || x >= c ? 0 : x < b ? smoothstep((x - a) / (b - a)) : 1 - smoothstep((x - b) / (c - b)));
+      return {
+        dawn: bump(hr, 4.5, 6.6, 9.5) * 0.65,
+        day: bump(hr, 8.5, 13, 17.5) * 0.8,
+        dusk: bump(hr, 16.5, 19.3, 21.8),
+        night: smoothstep((hr - 20) / 2) * 0.85,
+      };
+    }
+
+    function phaseOf(hr) {
+      if (hr < 8) return 'sunrise';
+      if (hr < 17) return 'sun';
+      if (hr < 20) return 'sunset';
+      return 'moon';
+    }
+
+    function fogStatus(hr, f) {
+      if (f >= 0.98) return 'Marine layer in';
+      if (hr < 15 && f > 0.01) return 'Burning off';
+      if (f <= 0.01) return 'Clear skies';
+      return 'Rolling back in';
+    }
+
+    function sparkSVG(zone, offset, hour) {
+      const W = 220;
+      const H = 46;
+      const y = (t) => H - 5 - ((t - 50) / 50) * (H - 10);
+      const pts = C.zoneCurve24(zone).map((t, i) => `${i ? 'L' : 'M'}${((i / 23) * W).toFixed(1)} ${y(t + offset).toFixed(1)}`).join('');
+      const cx = (hour / 23) * W;
+      const cy = y(C.tempAt(zone, hour, offset));
+      const col = ZONE_COLOR[zone];
+      return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true">
+        <rect class="night" x="0" y="0" width="${(6 / 23) * W}" height="${H}"/>
+        <rect class="night" x="${(22 / 23) * W}" y="0" width="${W - (22 / 23) * W}" height="${H}"/>
+        <path d="${pts}" fill="none" stroke="${col}" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${col}" stroke="#0b1020" stroke-width="2"/></svg>`;
+    }
+
+    function popupHTML(n, hour) {
+      const t = C.tempAt(n.zone, hour, n.offset);
+      const rh = C.humidityAt(n.zone, hour);
+      const f = C.fogFactor(hour);
+      const marine = n.zone === 'coastal' || n.zone === 'central'
+        ? (f > 0.6 ? 'thick marine layer' : f > 0.05 ? 'patchy marine layer' : 'sunny')
+        : 'no marine layer';
+      return `<div class="pp-head"><span class="badge" style="--bc:${ZONE_COLOR[n.zone]}">${esc(SDX.ZONES[n.zone].label)}</span><span class="muted mono">${fmtHour(hour)}</span></div>
+        <div class="pp-name">${esc(n.name)}</div>
+        <div class="pp-temp mono" style="color:${heatColor(t)}">${Math.round(t)}°F</div>
+        <div class="pp-stats"><span>RH <b class="mono">${Math.round(rh)}%</b></span><span>${marine}</span></div>
+        ${sparkSVG(n.zone, n.offset, hour)}
+        <div class="pp-note">Simulated late-summer day, not live weather.</div>`;
+    }
+
+    function placeCursor(ctx, hour) {
+      const ui = ctx.ui;
+      const ch = ui.chart;
+      if (!ch || !ui.area) return;
+      const x = ch.scales.x.getPixelForValue(hour);
+      ui.cline.style.transform = `translate3d(${x.toFixed(1)}px, ${ui.area.top}px, 0)`;
+      SERIES.forEach((s, i) => {
+        const t = C.tempAt(s.zone, hour, 0);
+        const yy = ch.scales.y.getPixelForValue(t);
+        ui.cdots[i].style.transform = `translate3d(${x.toFixed(1)}px, ${yy.toFixed(1)}px, 0)`;
+        const r = Math.round(t);
+        if (ui.vals[i]._r !== r) { ui.vals[i]._r = r; ui.vals[i].textContent = r + '°'; }
+      });
+    }
+
+    // Draw everything that depends on the eased hour. Cheap: only touches DOM when values change.
+    function render(ctx, hour, force = false) {
+      for (const p of pins) {
+        const t = C.tempAt(p.n.zone, hour, p.n.offset);
+        const r = Math.round(t);
+        if (force || r !== p.lastT) { p.lastT = r; p.tEl.textContent = r + '°'; }
+        const ck = Math.round(t * 3);
+        if (force || ck !== p.lastC) { p.lastC = ck; p.root.style.setProperty('--c', heatColor(t)); }
+      }
+      if (openPin && (force || openPin._lastPopupMin !== Math.round(hour * 12))) {
+        openPin._lastPopupMin = Math.round(hour * 12);
+        openPin.m.getPopup().setContent(popupHTML(openPin.n, hour));
+      }
+
+      const f = C.fogFactor(hour);
+      if (fogBase && (force || Math.abs(f - lastFog) > 0.002)) {
+        lastFog = f;
+        fogBase.setLatLngs(fogRings(f, false));
+        fogTex.setLatLngs(fogRings(f * 0.85, true));
+      }
+      // Marine layer shows only while Microclimates is the focused layer (and toggled on).
+      const on = ctx.state.fog && ctx.isFocused();
+      for (const layer of [fogBase, fogTex]) {
+        const svg = layer && layer._renderer && layer._renderer._container;
+        if (svg) svg.style.opacity = on ? String(clamp(f * 3, 0, 1)) : '0';
+      }
+
+      if (ambient) {
+        const w = ambientWeights(hour);
+        for (const k of Object.keys(w)) {
+          const v = w[k].toFixed(3);
+          if (ambient[k].style.opacity !== v) ambient[k].style.opacity = v;
+        }
+      }
+
+      // Throttled clock broadcast for any other module that wants to follow time-of-day.
+      if (Math.abs(hour - lastClock) >= 0.05 || force) { lastClock = hour; ctx.bus.emit('clock', { hour, source: ctx.id }); }
+
+      const ui = ctx.ui;
+      if (ui.time) {
+        const label = fmtHour(hour);
+        if (ui.time.textContent !== label) { ui.time.textContent = label; ui.bubble.textContent = label; }
+        const status = `${fogStatus(hour, f)} · ${Math.round(f * 100)}% coverage`;
+        if (ui.status.textContent !== status) ui.status.textContent = status;
+        const ph = phaseOf(hour);
+        if (ph !== lastPhase || force) {
+          lastPhase = ph;
+          ui.phases.forEach((el) => el.classList.toggle('on', el.dataset.phase === ph));
+        }
+      }
+      if (ui.chart) placeCursor(ctx, hour);
+      if (ui.tiles) {
+        for (const tile of ui.tiles) {
+          const t = C.tempAt(tile.zone, hour, 0);
+          const r = Math.round(t);
+          if (force || tile.r !== r) {
+            tile.r = r;
+            tile.v.textContent = r + '°F';
+            tile.el.style.setProperty('--c', heatColor(t));
+          }
+          const rh = Math.round(C.humidityAt(tile.zone, hour));
+          if (force || tile.rh !== rh) { tile.rh = rh; tile.hEl.textContent = `RH ${rh}%`; }
+        }
+        ui.meter.style.transform = `scaleX(${f.toFixed(3)})`;
+        const pct = Math.round(f * 100) + '%';
+        if (ui.meterV.textContent !== pct) ui.meterV.textContent = pct;
+      }
+    }
+
+    // Temperature pills + popups belong to Microclimates only; hide them when another layer is focused.
+    function applyFocusVisibility(ctx) {
+      const off = !ctx.isFocused();
+      ctx.map.getContainer().classList.toggle('sdx-temps-off', off);
+      for (const p of pins) { const el = p.m.getElement(); if (el) el.tabIndex = off ? -1 : 0; }
+      if (off && openPin) openPin.m.closePopup();
+    }
+
+    function syncSlider(ctx) {
+      const ui = ctx.ui;
+      if (!ui.slider) return;
+      const hr = ctx.state.hour;
+      if (document.activeElement !== ui.slider || ctx.state.playing) ui.slider.value = String(hr);
+      ui.wrap.style.setProperty('--p', ((hr - 6) / 16).toFixed(4));
+    }
+
+    function syncPlay(ctx) {
+      const b = ctx.ui.play;
+      if (!b) return;
+      const p = ctx.state.playing;
+      b.classList.toggle('is-playing', p);
+      b.setAttribute('aria-label', p ? 'Pause day animation' : 'Play day animation');
+      b.querySelector('.i-play').setAttribute('aria-hidden', String(p));
+      b.querySelector('.i-pause').setAttribute('aria-hidden', String(!p));
+    }
+
+    function setHour(ctx, hr) {
+      ctx.state.hour = clamp(hr, 6, 22); // hour is mutated in place; onFrame eases toward it
+      syncSlider(ctx);
+    }
+
+    return {
+      id: 'microclimates',
+      name: 'Microclimates',
+      description: 'Marine layer & neighborhood temperatures, 6 AM – 10 PM',
+      icon: 'thermometer-sun',
+      accent: '#38bdf8',
+
+      createState: () => ({ hour: 7.5, playing: false, fog: true }),
+      bounds: () => L.latLngBounds(SDX.DATA.neighborhoods.map((n) => [n.lat, n.lon])),
+
+      onActivate(ctx) {
+        const map = ctx.map;
+        display = ctx.state.hour;
+        lastFog = -1;
+        lastPhase = '';
+
+        for (const [name, z] of [['fog', 390], ['fogtex', 391], ['ambient', 250]]) {
+          if (!map.getPane(name)) { const p = map.createPane(name); p.style.zIndex = String(z); }
+        }
+        const base = L.svg({ pane: 'fog', padding: 0.6 });
+        const tex = L.svg({ pane: 'fogtex', padding: 0.6 });
+        fogBase = L.polygon(fogRings(1, false), { renderer: base, stroke: false, fillColor: '#4aa8e8', fillOpacity: 0.36, fillRule: 'nonzero', interactive: false }).addTo(ctx.layer);
+        fogTex = L.polygon(fogRings(0.85, true), { renderer: tex, stroke: false, fillColor: '#a6d8fb', fillOpacity: 0.2, fillRule: 'nonzero', interactive: false }).addTo(ctx.layer);
+
+        ambient = { el: h('div', { class: 'sdx-ambient' }) };
+        for (const k of ['dawn', 'day', 'dusk', 'night']) { ambient[k] = h('i', { class: 'amb ' + k }); ambient.el.append(ambient[k]); }
+        map.getPane('ambient').append(ambient.el);
+        onMapMove = () => {
+          const s = map.getSize();
+          L.DomUtil.setPosition(ambient.el, map.containerPointToLayerPoint([-s.x / 2, -s.y / 2]));
+          ambient.el.style.width = s.x * 2 + 'px';
+          ambient.el.style.height = s.y * 2 + 'px';
+        };
+        map.on('move zoomend viewreset resize', onMapMove);
+        onMapMove();
+
+        const center = map.getCenter();
+        const ranked = SDX.DATA.neighborhoods
+          .map((n) => ({ n, d: map.distance(center, [n.lat, n.lon]) }))
+          .sort((a, b) => a.d - b.d);
+        pins = ranked.map(({ n }, rank) => {
+          const m = L.marker([n.lat, n.lon], {
+            keyboard: true, riseOnHover: true,
+            icon: L.divIcon({
+              className: 'sdx-icon', iconSize: [0, 0], iconAnchor: [0, 0],
+              html: `<div class="sdx-anchor"><div class="sdx-temp" style="--i:${rank}"><span class="dot"></span><span class="t">--°</span><span class="nm">${esc(n.name)}</span></div></div>`,
+            }),
+          }).addTo(ctx.layer);
+          m.bindPopup('', { offset: [0, -12], maxWidth: 260, minWidth: 220, autoPanPaddingTopLeft: [20, 90] });
+          const el = m.getElement();
+          el.setAttribute('aria-label', `${n.name} temperature`);
+          el.setAttribute('role', 'button');
+          return { n, m, root: el.querySelector('.sdx-temp'), tEl: el.querySelector('.t'), lastT: null, lastC: null };
+        });
+        onPopupOpen = (e) => {
+          const p = pins.find((x) => x.m === e.popup._source);
+          if (!p) return;
+          openPin = p;
+          p._lastPopupMin = null;
+          p.m.getPopup().setContent(popupHTML(p.n, display));
+        };
+        onPopupClose = (e) => { if (openPin && openPin.m === e.popup._source) openPin = null; };
+        map.on('popupopen', onPopupOpen);
+        map.on('popupclose', onPopupClose);
+
+        render(ctx, display, true);
+        applyFocusVisibility(ctx);
+      },
+
+      onDeactivate(ctx) {
+        const map = ctx.map;
+        ctx.state.playing = false;
+        map.getContainer().classList.remove('sdx-temps-off');
+        map.off('move zoomend viewreset resize', onMapMove);
+        map.off('popupopen', onPopupOpen);
+        map.off('popupclose', onPopupClose);
+        const amb = ambient;
+        if (amb) { amb.el.classList.add('is-off'); setTimeout(() => amb.el.remove(), 650); }
+        ambient = null;
+        for (const layer of [fogBase, fogTex]) {
+          const svg = layer && layer._renderer && layer._renderer._container;
+          if (svg) svg.style.opacity = '0';
+        }
+        fogBase = fogTex = null;
+        pins = [];
+        openPin = null;
+      },
+
+      onStateChange(ctx, prev) {
+        if (ctx.state.fog !== prev.fog) {
+          render(ctx, display, true);
+          const sw = ctx.ui.fogSwitch;
+          if (sw) sw.setAttribute('aria-checked', String(ctx.state.fog));
+        }
+        if (ctx.state.playing !== prev.playing) syncPlay(ctx);
+      },
+
+      // Fade the marine layer out when another layer takes focus, back in on return.
+      onFocus(ctx) { if (display != null) render(ctx, display, true); applyFocusVisibility(ctx); },
+      onBlur(ctx) { if (display != null) render(ctx, display, true); applyFocusVisibility(ctx); },
+
+      onFrame(ctx, dt) {
+        const s = ctx.state;
+        if (s.playing) {
+          let next = s.hour + dt * PLAY_HOURS_PER_MS;
+          if (next >= 22) { next = 22; s.playing = false; syncPlay(ctx); }
+          setHour(ctx, next);
+        }
+        if (display == null) display = s.hour;
+        const diff = s.hour - display;
+        if (Math.abs(diff) > 1e-4) {
+          const k = motion() ? 1 - Math.exp(-dt / (s.playing ? 40 : 110)) : 1;
+          display = Math.abs(diff) < 1e-3 ? s.hour : display + diff * k;
+          render(ctx, display);
+        }
+      },
+
+      renderControls(el, ctx) {
+        el.innerHTML = `
+          <div class="dock-row">
+            <div class="time-block">
+              <div class="phase" aria-hidden="true">
+                <span class="p-sunrise" data-phase="sunrise">${icon('sunrise')}</span>
+                <span class="p-sun" data-phase="sun">${icon('sun')}</span>
+                <span class="p-sunset" data-phase="sunset">${icon('sunset')}</span>
+                <span class="p-moon" data-phase="moon">${icon('moon')}</span>
+              </div>
+              <div>
+                <div class="time-big mono" aria-live="off">--</div>
+                <div class="time-sub">--</div>
+              </div>
+            </div>
+            <button type="button" class="play">
+              <span class="i-play">${icon('play')}</span><span class="i-pause" aria-hidden="true">${icon('pause')}</span>
+            </button>
+          </div>
+          <div class="range-wrap">
+            <div class="range-bubble mono">--</div>
+            <input class="sdx-range" type="range" min="6" max="22" step="any" aria-label="Time of day">
+            <div class="range-ticks mono"><span>6a</span><span>10a</span><span>2p</span><span>6p</span><span>10p</span></div>
+          </div>
+          <div class="dock-row" style="margin-top:14px">
+            <div class="flex items-center gap-3">
+              <button type="button" class="switch" role="switch" style="--accent:#38bdf8" aria-label="Marine layer overlay"></button>
+              <div><div class="lbl">Marine layer</div><div class="sub">Burns off after 11 AM, returns after 7 PM</div></div>
+            </div>
+            <button type="button" class="btn now">${icon('locate-fixed')}Now</button>
+          </div>`;
+        const ui = ctx.ui;
+        ui.time = el.querySelector('.time-big');
+        ui.status = el.querySelector('.time-sub');
+        ui.phases = [...el.querySelectorAll('.phase > span')];
+        ui.play = el.querySelector('.play');
+        ui.slider = el.querySelector('.sdx-range');
+        ui.wrap = el.querySelector('.range-wrap');
+        ui.bubble = el.querySelector('.range-bubble');
+        ui.fogSwitch = el.querySelector('.switch');
+        ui.fogSwitch.setAttribute('aria-checked', String(ctx.state.fog));
+
+        ui.play.addEventListener('click', () => {
+          if (!ctx.state.playing && ctx.state.hour >= 21.99) setHour(ctx, 6);
+          ctx.setState({ playing: !ctx.state.playing });
+        });
+        ui.slider.addEventListener('pointerdown', () => { if (ctx.state.playing) ctx.setState({ playing: false }); });
+        ui.slider.addEventListener('input', () => setHour(ctx, Math.round(Number(ui.slider.value) * 4) / 4));
+        ui.slider.addEventListener('keydown', (e) => {
+          const steps = { ArrowLeft: -0.25, ArrowDown: -0.25, ArrowRight: 0.25, ArrowUp: 0.25, PageDown: -1, PageUp: 1 };
+          if (e.key in steps) setHour(ctx, Math.round((ctx.state.hour + steps[e.key]) * 4) / 4);
+          else if (e.key === 'Home') setHour(ctx, 6);
+          else if (e.key === 'End') setHour(ctx, 22);
+          else return;
+          e.preventDefault();
+          if (ctx.state.playing) ctx.setState({ playing: false });
+        });
+        ui.fogSwitch.addEventListener('click', () => ctx.setState({ fog: !ctx.state.fog }));
+        el.querySelector('.now').addEventListener('click', () => {
+          const d = new Date();
+          if (ctx.state.playing) ctx.setState({ playing: false });
+          setHour(ctx, d.getHours() + d.getMinutes() / 60);
+        });
+
+        syncSlider(ctx);
+        syncPlay(ctx);
+        render(ctx, display ?? ctx.state.hour, true);
+      },
+
+      renderSidebar(el, ctx) {
+        el.innerHTML = `
+          <section class="card">
+            <div class="card-h"><h3>24-hour temperature</h3><span class="muted">by zone · °F</span></div>
+            <div class="series-legend">${SERIES.map((s) => `<span class="it" style="--c:${s.color}"><i></i>${SDX.ZONES[s.zone].label} <b class="mono">--</b></span>`).join('')}</div>
+            <div class="chart-wrap">
+              <canvas role="img" aria-label="Line chart of simulated temperature over 24 hours for coastal, inland and mountain zones"></canvas>
+              <i class="cursor-line"></i>
+              ${SERIES.map((s) => `<i class="cdot" style="--c:${s.color}"></i>`).join('')}
+            </div>
+          </section>
+          <section class="card">
+            <div class="card-h"><h3>Right now</h3><span class="muted">zone averages</span></div>
+            <div class="tiles">
+              ${['coastal', 'central', 'inland', 'mountain'].map((z) => `<div class="tile" data-zone="${z}"><div class="tn"><i></i>${SDX.ZONES[z].label}</div><div class="tv mono">--</div><div class="th mono">--</div></div>`).join('')}
+            </div>
+          </section>
+          <section class="card">
+            <div class="card-h"><h3>Marine layer coverage</h3><b class="mono meter-v">--</b></div>
+            <div class="meter"><i></i></div>
+            <p class="sub" style="margin-top:9px">Coastal cloud deck pushes up Mission Valley and across the bay overnight, burns back to the beaches by early afternoon, then rolls in again after sunset.</p>
+          </section>
+          <p class="note">${icon('info')}<span>Simulated model of a typical late-summer day. Temperatures and fog are illustrative, not live weather.</span></p>`;
+
+        const ui = ctx.ui;
+        ui.vals = [...el.querySelectorAll('.series-legend b')];
+        ui.cline = el.querySelector('.cursor-line');
+        ui.cdots = [...el.querySelectorAll('.cdot')];
+        ui.tiles = [...el.querySelectorAll('.tile')].map((t) => ({ el: t, zone: t.dataset.zone, v: t.querySelector('.tv'), hEl: t.querySelector('.th') }));
+        ui.meter = el.querySelector('.meter > i');
+        ui.meterV = el.querySelector('.meter-v');
+
+        const nightShade = {
+          id: 'nightShade',
+          beforeDatasetsDraw(ch) {
+            const { ctx: g, chartArea: a, scales: { x } } = ch;
+            g.save();
+            g.fillStyle = 'rgba(99,102,241,.08)';
+            const x6 = x.getPixelForValue(6);
+            const x22 = x.getPixelForValue(22);
+            g.fillRect(a.left, a.top, x6 - a.left, a.bottom - a.top);
+            g.fillRect(x22, a.top, a.right - x22, a.bottom - a.top);
+            g.restore();
+          },
+        };
+        const glow = {
+          id: 'glow',
+          beforeDatasetDraw(ch, args) { ch.ctx.save(); ch.ctx.shadowColor = ch.data.datasets[args.index].borderColor; ch.ctx.shadowBlur = 12; },
+          afterDatasetDraw(ch) { ch.ctx.restore(); },
+        };
+        const cursorSync = {
+          id: 'cursorSync',
+          afterLayout(ch) {
+            ui.area = ch.chartArea;
+            if (ui.cline) ui.cline.style.height = ch.chartArea.bottom - ch.chartArea.top + 'px';
+            placeCursor(ctx, display ?? ctx.state.hour);
+          },
+        };
+
+        ui.chart = ctx.chart(el.querySelector('canvas'), {
+          type: 'line',
+          data: {
+            datasets: SERIES.map((s) => ({
+              label: SDX.ZONES[s.zone].label,
+              data: C.zoneCurve24(s.zone).map((y, x) => ({ x, y })),
+              borderColor: s.color, backgroundColor: s.color, borderWidth: 2,
+              pointRadius: 0, pointHoverRadius: 5, pointHoverBorderWidth: 2, pointHoverBorderColor: '#0b1020',
+              tension: 0.4, cubicInterpolationMode: 'monotone',
+            })),
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            animation: motion() ? { duration: 900, easing: 'easeOutQuart' } : false,
+            animations: motion() ? {
+              y: {
+                from: (c) => (c.chart.chartArea ? c.chart.chartArea.bottom : undefined),
+                delay: (c) => (c.type === 'data' && c.mode === 'default' ? c.dataIndex * 18 + c.datasetIndex * 140 : 0),
+              },
+            } : {},
+            layout: { padding: { top: 6, right: 6 } },
+            scales: {
+              x: {
+                type: 'linear', min: 0, max: 23, grid: { display: false }, border: { color: 'rgba(148,163,184,.18)' },
+                ticks: { stepSize: 3, callback: hourTick, maxRotation: 0, font: { family: 'JetBrains Mono', size: 10 } },
+              },
+              y: {
+                min: 40, max: 100, border: { display: false }, grid: { color: 'rgba(148,163,184,.08)' },
+                ticks: { stepSize: 10, callback: (v) => v + '°', font: { family: 'JetBrains Mono', size: 10 } },
+              },
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                ...TOOLTIP,
+                callbacks: {
+                  title: (items) => fmtHour(items[0].parsed.x),
+                  label: (i) => ` ${i.dataset.label}  ${Math.round(i.parsed.y)}°F`,
+                },
+              },
+            },
+          },
+          plugins: [nightShade, glow, cursorSync],
+        });
+
+        render(ctx, display ?? ctx.state.hour, true);
+      },
+
+      legend(ctx) {
+        if (!ctx.isFocused()) return '';
+        return `<div class="lg-title">Temperature</div>
+          <div class="lg-ramp"></div>
+          <div class="lg-ticks mono"><span>60°</span><span>76°</span><span>98°</span></div>
+          ${ctx.isFocused() && ctx.state.fog ? '<div class="lg-row"><i class="sw fog"></i>Marine layer</div>' : ''}`;
+      },
+    };
+  })();
+
+  // ==================================================================
+  // MODULE 2: Taco & Brewery Hotspots
+  // ==================================================================
+  const Hotspots = (() => {
+    const LM = SDX.DATA.landmarks;
+    const HOODS = new Map(SDX.DATA.neighborhoods.map((n) => [n.id, n]));
+    const byId = new Map(LM.map((p) => [p.id, p]));
+    const FILTERS = [
+      { key: 'crawlable', label: 'Crawlable Only', hint: 'pairs ≤ 1.5 mi', icon: 'footprints' },
+      { key: 'hazyIPA', label: 'Hazy IPA Focus', hint: 'simulated', icon: 'hop' },
+      { key: 'open247', label: '24/7 Taco Shops', hint: 'per OSM hours', icon: 'clock' },
+      { key: 'bajaFish', label: 'Mariscos / Baja', hint: 'seafood spots', icon: 'fish' },
+    ];
+    const TAG_LABELS = { hazyIPA: 'Hazy IPA', open247: '24/7', bajaFish: 'Seafood' };
+    const BREW = '#c98500';
+    const TACO = '#e5484d';
+
+    // Markers live in a cluster group, which destroys and recreates their DOM as clusters
+    // split and merge. So visual state is kept on the pin and re-applied on every 'add'.
+    let pins = new Map();   // id -> { p, m, shown, pinned, dim, selected, target, d }
+    let cluster = null;
+    let pinnedGroup = null; // crawl pins pulled out of clusters so the route is always visible
+    let crawlGroup = null;
+    let onMapClick = null;
+    let targets = [];
+    let introUntil = 0;
+
+    // Crawlable is O(n^2) over ~400 spots; memoize on the filters object (replaced on change).
+    let memo = { filters: null, out: [] };
+    const visible = (ctx) => {
+      if (memo.filters !== ctx.state.filters) memo = { filters: ctx.state.filters, out: SDX.filters.applyFilters(LM, ctx.state.filters) };
+      return memo.out;
+    };
+
+    function paintPin(pin) {
+      const host = pin.m.getElement();
+      if (!host) return;
+      const el = host.querySelector('.sdx-pin');
+      el.classList.toggle('is-dim', pin.dim);
+      el.classList.toggle('is-selected', pin.selected);
+      el.classList.toggle('is-target', pin.target);
+      el.style.setProperty('--d', pin.d || '0ms');
+      if (performance.now() > introUntil) el.style.setProperty('--i', '0');
+      host.setAttribute('role', 'button');
+      host.setAttribute('aria-label', `${pin.p.type === 'brewery' ? 'Brewery' : 'Taco shop'}: ${pin.p.name}`);
+    }
+
+    function pinOut(pin) { // move from cluster to the always-visible group
+      if (pin.pinned || !pin.shown) return;
+      pin.pinned = true;
+      cluster.removeLayer(pin.m);
+      pinnedGroup.addLayer(pin.m);
+    }
+    function pinBack(pin) {
+      if (!pin.pinned) return;
+      pin.pinned = false;
+      pinnedGroup.removeLayer(pin.m);
+      if (pin.shown) cluster.addLayer(pin.m);
+    }
+
+    function clusterIcon(c) {
+      const kids = c.getAllChildMarkers();
+      const n = kids.length;
+      const b = kids.filter((m) => m.options.poiType === 'brewery').length;
+      const size = n < 10 ? 38 : n < 40 ? 46 : 56;
+      return L.divIcon({
+        className: 'sdx-icon', iconSize: [0, 0], iconAnchor: [0, 0],
+        html: `<div class="sdx-anchor"><div class="sdx-cluster" style="--pb:${Math.round((b / n) * 100)}%;--s:${size}px" title="${b} breweries · ${n - b} taco shops"><b class="mono">${n}</b></div></div>`,
+      });
+    }
+    const tagsFor = (p) => (p.type === 'brewery' ? ['hazyIPA'] : ['open247', 'bajaFish']);
+
+    function poiPopup(ctx, p) {
+      const hoodName = HOODS.get(p.hood)?.name ?? '';
+      const isBrew = p.type === 'brewery';
+      const tags = tagsFor(p).map((k) => `<span class="tag ${p.tags[k] ? 'on' : ''}">${TAG_LABELS[k]}</span>`).join('');
+      let foot = '';
+      if (isBrew) {
+        const near = SDX.crawl.nearestTacos(p, visible(ctx), { max: 1, radiusMi: 5 })[0];
+        if (near) foot = `Nearest taco: <b>${esc(near.poi.name)}</b> · ${fmtMi(near.miles)} · ${near.minutes} min walk`;
+      } else {
+        const brews = visible(ctx).filter((b) => b.type === 'brewery')
+          .map((b) => ({ b, mi: SDX.geo.haversineMi(p, b) })).sort((a, b) => a.mi - b.mi)[0];
+        if (brews) foot = `Nearest brewery: <b>${esc(brews.b.name)}</b> · ${fmtMi(brews.mi)} · ${SDX.geo.walkMinutes(brews.mi)} min walk`;
+      }
+      return `<div class="pp-head"><span class="badge" style="--bc:${isBrew ? '#f2b53a' : '#ff7a59'}">${isBrew ? '🍺 Brewery' : '🌮 Taco shop'}</span><span class="muted">${esc(hoodName)}</span></div>
+        <div class="pp-name">${esc(p.name)}</div>
+        ${p.addr ? `<div class="muted" style="margin-top:2px">${esc(p.addr)}</div>` : ''}
+        ${p.hours ? `<div class="muted mono" style="margin-top:2px;font-size:11px">${esc(p.hours)}</div>` : ''}
+        <div class="tagrow">${tags}</div>
+        ${foot ? `<div class="pp-foot">${foot}</div>` : ''}
+        <div class="pp-note">Location &amp; hours: OpenStreetMap${isBrew ? ' · Hazy IPA tag is simulated' : ''}</div>`;
+    }
+
+    function openPopup(ctx, p) {
+      L.popup({ offset: [0, -20], maxWidth: 280, minWidth: 220, autoPanPaddingTopLeft: [20, 90] })
+        .setLatLng([p.lat, p.lon]).setContent(poiPopup(ctx, p)).openOn(ctx.map);
+    }
+
+    function applyVisibility(ctx) {
+      const vis = new Set(visible(ctx).map((p) => p.id));
+      const hood = ctx.state.hood;
+      const add = [];
+      const remove = [];
+      for (const [id, pin] of pins) {
+        const show = vis.has(id);
+        if (!pin.pinned && show !== pin.shown) (show ? add : remove).push(pin.m);
+        pin.shown = show;
+        pin.dim = show && hood !== 'all' && pin.p.hood !== hood;
+        paintPin(pin);
+      }
+      if (remove.length) cluster.removeLayers(remove);
+      if (add.length) cluster.addLayers(add);
+      return vis;
+    }
+
+    function animateDraw(path, i) {
+      if (!path) return;
+      if (!motion()) { path.classList.add('ants'); return; }
+      // pathLength=1 normalizes the dash so the draw-on works at any zoom level.
+      path.setAttribute('pathLength', '1');
+      path.style.strokeDasharray = '1';
+      path.style.strokeDashoffset = '1';
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        path.style.transition = `stroke-dashoffset .85s var(--ease-in-out) ${280 + i * 140}ms`;
+        path.style.strokeDashoffset = '0';
+      }));
+      path.addEventListener('transitionend', () => {
+        path.removeAttribute('pathLength');
+        path.style.transition = '';
+        path.style.strokeDasharray = '';
+        path.style.strokeDashoffset = '';
+        path.classList.add('ants');
+      }, { once: true });
+    }
+
+    function clearCrawl() {
+      if (crawlGroup) crawlGroup.clearLayers();
+      for (const pin of pins.values()) {
+        if (!pin.selected && !pin.target && !pin.pinned) continue;
+        pin.selected = pin.target = false;
+        pin.d = '';
+        pinBack(pin);
+        paintPin(pin);
+      }
+      targets = [];
+    }
+
+    function drawCrawl(ctx, b, { fly = true } = {}) {
+      clearCrawl();
+      const res = SDX.crawl.nearestTacos(b, visible(ctx), { max: 3, radiusMi: 1.5 });
+      targets = res;
+      const bp = pins.get(b.id);
+      if (bp) { bp.selected = true; pinOut(bp); paintPin(bp); }
+      res.forEach((r, i) => {
+        const line = L.polyline([[b.lat, b.lon], [r.poi.lat, r.poi.lon]], {
+          className: 'crawl-line', color: '#f2b53a', weight: 3, opacity: 1, interactive: false,
+        }).addTo(crawlGroup);
+        // Label sits beside the taco pin (not the line midpoint) so tight clusters stay legible.
+        // ...and on the side facing away from the brewery so it never covers the start pin.
+        const east = r.poi.lon >= b.lon;
+        L.tooltip({ permanent: true, direction: east ? 'right' : 'left', offset: [east ? 20 : -20, 0], className: 'crawl-tip', opacity: 1, interactive: false })
+          .setLatLng([r.poi.lat, r.poi.lon])
+          .setContent(`<span class="ct" style="--d:${i}"><i class="ci">${i + 1}</i><b>${fmtMi(r.miles)}</b> · ${r.minutes} min walk</span>`)
+          .addTo(crawlGroup);
+        animateDraw(line.getElement(), i);
+        const tp = pins.get(r.poi.id);
+        if (tp) { tp.target = true; tp.d = `${700 + i * 160}ms`; pinOut(tp); paintPin(tp); }
+      });
+      if (!res.length) ctx.toast(`No taco shops within 1.5 mi of ${b.name} (with current filters)`);
+      if (fly) {
+        const pts = [[b.lat, b.lon], ...res.map((r) => [r.poi.lat, r.poi.lon])];
+        // padRight leaves room for the walk-time labels drawn to the right of each taco pin.
+        ctx.flyTo(L.latLngBounds(pts), { maxZoom: res.length ? 17 : 15, duration: 0.9, padRight: 200, padLeft: 200 });
+      }
+    }
+
+    function hoodCounts(ctx) {
+      const vis = visible(ctx);
+      const rows = new Map();
+      for (const p of LM) if (!rows.has(p.hood)) rows.set(p.hood, { id: p.hood, name: HOODS.get(p.hood).name, b: 0, t: 0, all: 0 });
+      for (const p of LM) rows.get(p.hood).all++;
+      for (const p of vis) rows.get(p.hood)[p.type === 'brewery' ? 'b' : 't']++;
+      return [...rows.values()].sort((a, b) => b.all - a.all || a.name.localeCompare(b.name));
+    }
+
+    function updateStats(ctx) {
+      const ui = ctx.ui;
+      const s = ctx.state;
+      const vis = visible(ctx);
+      if (ui.visCount) tweenNumber(ui.visCount, vis.length);
+      if (!ui.donut) return;
+
+      const scope = s.hood === 'all' ? vis : vis.filter((p) => p.hood === s.hood);
+      const b = scope.filter((p) => p.type === 'brewery').length;
+      const t = scope.length - b;
+      const ds = ui.donut.data.datasets[0];
+      ds.data = [b, t, b + t === 0 ? 1 : 0];
+      ui.donut.update();
+      tweenNumber(ui.total, b + t);
+      tweenNumber(ui.bVal, b);
+      tweenNumber(ui.tVal, t);
+      const pct = (v) => (b + t ? Math.round((v / (b + t)) * 100) : 0) + '%';
+      ui.bPct.textContent = pct(b);
+      ui.tPct.textContent = pct(t);
+      if (ui.sel.value !== s.hood) ui.sel.value = s.hood;
+
+      const rows = hoodCounts(ctx);
+      const max = Math.max(1, ...rows.map((r) => r.b + r.t));
+      for (const r of rows) {
+        const row = ui.rows.get(r.id);
+        if (!row) continue;
+        row.bEl.style.width = (r.b / max) * 100 + '%';
+        row.tEl.style.width = (r.t / max) * 100 + '%';
+        row.ct.textContent = `${r.b}·${r.t}`;
+        row.el.classList.toggle('is-on', s.hood === r.id);
+        row.el.setAttribute('aria-pressed', String(s.hood === r.id));
+      }
+      renderCrawlCard(ctx);
+    }
+
+    function renderCrawlCard(ctx) {
+      const box = ctx.ui.crawlBox;
+      if (!box) return;
+      const s = ctx.state;
+      if (!s.crawl) {
+        box.innerHTML = `<div class="crawl-hint">${icon('route')}<span>Crawl mode is off. Turn it on in the controls, then tap a 🍺 brewery.</span></div>`;
+      } else if (!s.selected) {
+        box.innerHTML = `<div class="crawl-hint">${icon('footprints')}<span>Tap any 🍺 brewery on the map to draw walking routes to the 3 closest taco shops within 1.5 miles.</span></div>`;
+      } else {
+        const b = byId.get(s.selected);
+        const total = targets.reduce((a, r) => a + r.minutes, 0);
+        box.innerHTML = `
+          <div class="flex items-center justify-between gap-2">
+            <div class="min-w-0"><div class="pp-name" style="font-size:14px">${esc(b.name)}</div><div class="muted">${esc(HOODS.get(b.hood).name)} · start here</div></div>
+            <button type="button" class="btn clear">${icon('x')}Clear</button>
+          </div>
+          <div class="steps">${targets.length ? targets.map((r, i) => `
+            <button type="button" class="step" data-id="${r.poi.id}" style="animation-delay:${i * 70}ms">
+              <span class="n mono">${i + 1}</span>
+              <span class="min-w-0"><span class="t block truncate">${esc(r.poi.name)}</span><span class="m">${tagsFor(r.poi).filter((k) => r.poi.tags[k]).map((k) => TAG_LABELS[k]).join(' · ') || 'Classic taco shop'}</span></span>
+              <span class="w mono">${fmtMi(r.miles)} · ${r.minutes}m</span>
+            </button>`).join('') : '<div class="muted">No taco shops within 1.5 mi with the current filters.</div>'}
+          </div>
+          ${targets.length ? `<div class="sub" style="margin-top:8px">One-way walks at ~${SDX.geo.WALK_MPH} mph with a street-grid factor · ${total} min if you visit each and return.</div>` : ''}`;
+        box.querySelector('.clear').addEventListener('click', () => ctx.setState({ selected: null }));
+        box.querySelectorAll('.step').forEach((btn) => btn.addEventListener('click', () => {
+          const p = byId.get(btn.dataset.id);
+          ctx.map.flyTo([p.lat, p.lon], Math.max(ctx.map.getZoom(), 15), { duration: motion() ? 0.8 : 0 });
+          openPopup(ctx, p);
+        }));
+      }
+      paintIcons();
+    }
+
+    function flyToHood(ctx) {
+      const s = ctx.state;
+      const pts = (s.hood === 'all' ? LM : LM.filter((p) => p.hood === s.hood)).map((p) => [p.lat, p.lon]);
+      if (pts.length) ctx.flyTo(L.latLngBounds(pts), { maxZoom: s.hood === 'all' ? 12.5 : 15 });
+    }
+
+    return {
+      id: 'hotspots',
+      name: 'Tacos & Brews',
+      description: 'Craft breweries, taco shops & walkable crawls',
+      icon: 'beer',
+      accent: '#f2b53a',
+
+      createState: () => ({
+        filters: { crawlable: false, hazyIPA: false, open247: false, bajaFish: false },
+        crawl: true, selected: null, hood: 'all',
+      }),
+      bounds: () => L.latLngBounds(LM.map((p) => [p.lat, p.lon])),
+
+      onActivate(ctx) {
+        const map = ctx.map;
+        pins = new Map();
+        memo = { filters: null, out: [] };
+        introUntil = performance.now() + 1600;
+        cluster = L.markerClusterGroup({
+          maxClusterRadius: 52, disableClusteringAtZoom: 15, showCoverageOnHover: false,
+          spiderfyOnMaxZoom: false, animate: motion(), chunkedLoading: true, iconCreateFunction: clusterIcon,
+        }).addTo(ctx.layer);
+        pinnedGroup = L.layerGroup().addTo(ctx.layer);
+        crawlGroup = L.layerGroup().addTo(ctx.layer);
+        const center = map.getCenter();
+        const ranked = [...LM].sort((a, b) => map.distance(center, [a.lat, a.lon]) - map.distance(center, [b.lat, b.lon]));
+        ranked.forEach((p, rank) => {
+          const m = L.marker([p.lat, p.lon], {
+            keyboard: true, riseOnHover: true, poiType: p.type,
+            icon: L.divIcon({
+              className: 'sdx-icon', iconSize: [0, 0], iconAnchor: [0, 0],
+              html: `<div class="sdx-anchor"><div class="sdx-pin ${p.type}" style="--i:${Math.min(rank, 32)}"><span class="glyph" aria-hidden="true">${p.type === 'brewery' ? '🍺' : '🌮'}</span></div></div>`,
+            }),
+          });
+          const pin = { p, m, shown: false, pinned: false, dim: false, selected: false, target: false, d: '' };
+          m.bindTooltip(esc(p.name), { direction: 'top', offset: [0, -20], className: 'sdx-tip' });
+          m.on('add', () => paintPin(pin));
+          m.on('click', () => {
+            if (p.type === 'brewery' && ctx.state.crawl) { m.closeTooltip(); ctx.setState({ selected: p.id }); }
+            else openPopup(ctx, p);
+          });
+          m.on('keypress', (e) => { if (e.originalEvent.key === 'Enter') m.fire('click'); });
+          pins.set(p.id, pin);
+        });
+        onMapClick = () => { if (ctx.state.selected) ctx.setState({ selected: null }); };
+        map.on('click', onMapClick);
+        applyVisibility(ctx);
+        if (ctx.state.selected) drawCrawl(ctx, byId.get(ctx.state.selected), { fly: false });
+      },
+
+      onDeactivate(ctx) {
+        ctx.map.off('click', onMapClick);
+        ctx.map.closePopup();
+        pins = new Map();
+        cluster = pinnedGroup = crawlGroup = null;
+        targets = [];
+      },
+
+      onStateChange(ctx, prev) {
+        const s = ctx.state;
+        if (!s.crawl && s.selected) s.selected = null;
+        let vis = null;
+        if (s.filters !== prev.filters || s.hood !== prev.hood) vis = applyVisibility(ctx);
+        if (s.selected && vis && !vis.has(s.selected)) s.selected = null;
+        if (s.selected !== prev.selected) {
+          if (s.selected) drawCrawl(ctx, byId.get(s.selected)); else clearCrawl();
+        } else if (s.selected && s.filters !== prev.filters) {
+          drawCrawl(ctx, byId.get(s.selected), { fly: false });
+        }
+        if (s.hood !== prev.hood) flyToHood(ctx);
+        const sw = ctx.ui.crawlSwitch;
+        if (sw) sw.setAttribute('aria-checked', String(s.crawl));
+        updateStats(ctx);
+      },
+
+      renderControls(el, ctx) {
+        const s = ctx.state;
+        el.innerHTML = `
+          <div class="dock-row" style="margin-bottom:10px">
+            <span class="eyebrow">Filters</span>
+            <span class="muted"><b class="mono vis-count" style="color:var(--text)">${visible(ctx).length}</b> / ${LM.length} spots</span>
+          </div>
+          <div class="fchips">${FILTERS.map((f) => `
+            <label class="fchip">
+              <input type="checkbox" data-key="${f.key}" ${s.filters[f.key] ? 'checked' : ''}>
+              ${icon(f.icon)}<span>${f.label}<small>${f.hint}</small></span><span class="check" aria-hidden="true"></span>
+            </label>`).join('')}
+          </div>
+          <div class="dock-row" style="margin-top:14px">
+            <div class="flex items-center gap-3">
+              <button type="button" class="switch" role="switch" style="--accent:#f2b53a" aria-label="Taco and beer crawl mode"></button>
+              <div><div class="lbl">Taco &amp; beer crawl</div><div class="sub">Tap a 🍺 to map the 3 closest taco stops within 1.5 mi</div></div>
+            </div>
+          </div>`;
+        ctx.ui.visCount = el.querySelector('.vis-count');
+        ctx.ui.visCount._v = visible(ctx).length;
+        ctx.ui.crawlSwitch = el.querySelector('.switch');
+        ctx.ui.crawlSwitch.setAttribute('aria-checked', String(s.crawl));
+        ctx.ui.crawlSwitch.addEventListener('click', () => ctx.setState({ crawl: !ctx.state.crawl }));
+        el.querySelectorAll('input[data-key]').forEach((inp) => inp.addEventListener('change', () => {
+          ctx.setState({ filters: { ...ctx.state.filters, [inp.dataset.key]: inp.checked } });
+        }));
+      },
+
+      renderSidebar(el, ctx) {
+        const rows = hoodCounts(ctx);
+        el.innerHTML = `
+          <section class="card">
+            <div class="card-h">
+              <h3>Brewery vs taco mix</h3>
+              <select class="sel" aria-label="Neighborhood">
+                <option value="all">All neighborhoods</option>
+                ${rows.map((r) => `<option value="${r.id}">${esc(r.name)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="donut-wrap">
+              <canvas role="img" aria-label="Donut chart of breweries versus taco shops"></canvas>
+              <div class="donut-center"><div><b class="mono total">0</b><span>spots shown</span></div></div>
+            </div>
+            <div class="split">
+              <div><div class="k"><i class="sw brew"></i>Breweries</div><div class="v mono"><span class="bv">0</span><small class="bp">0%</small></div></div>
+              <div><div class="k"><i class="sw taco"></i>Taco shops</div><div class="v mono"><span class="tv">0</span><small class="tp">0%</small></div></div>
+            </div>
+          </section>
+          <section class="card">
+            <div class="card-h"><h3>By area</h3><span class="muted">🍺 · 🌮 after filters</span></div>
+            <div class="hood-rows">${rows.map((r) => `
+              <button type="button" class="hrow" data-id="${r.id}" aria-pressed="false">
+                <span class="nm">${esc(r.name)}</span>
+                <span class="hbar"><i class="b" style="width:0"></i><i class="t" style="width:0"></i></span>
+                <span class="ct mono">0·0</span>
+              </button>`).join('')}
+            </div>
+          </section>
+          <section class="card">
+            <div class="card-h"><h3>Crawl route</h3><span class="muted">≤ 1.5 mi on foot</span></div>
+            <div class="crawl-box"></div>
+          </section>
+          <p class="note">${icon('info')}<span>Breweries and taco shops across San Diego County from OpenStreetMap (ODbL), national chains left out. 24/7 and seafood come from OSM tags where mapped, Crawlable from real distances; Hazy IPA is simulated. Refresh with <code>node scripts/fetch-pois.mjs</code>, so check before you go.</span></p>`;
+
+        const ui = ctx.ui;
+        ui.sel = el.querySelector('.sel');
+        ui.sel.value = ctx.state.hood;
+        ui.sel.addEventListener('change', () => ctx.setState({ hood: ui.sel.value }));
+        ui.total = el.querySelector('.total');
+        ui.bVal = el.querySelector('.bv');
+        ui.tVal = el.querySelector('.tv');
+        ui.bPct = el.querySelector('.bp');
+        ui.tPct = el.querySelector('.tp');
+        ui.crawlBox = el.querySelector('.crawl-box');
+        ui.rows = new Map([...el.querySelectorAll('.hrow')].map((row) => {
+          row.addEventListener('click', () => ctx.setState({ hood: ctx.state.hood === row.dataset.id ? 'all' : row.dataset.id }));
+          return [row.dataset.id, { el: row, bEl: row.querySelector('.b'), tEl: row.querySelector('.t'), ct: row.querySelector('.ct') }];
+        }));
+
+        ui.donut = ctx.chart(el.querySelector('canvas'), {
+          type: 'doughnut',
+          data: {
+            labels: ['Breweries', 'Taco shops', 'None'],
+            datasets: [{
+              data: [0, 0, 1],
+              backgroundColor: [BREW, TACO, 'rgba(148,163,184,.14)'],
+              hoverBackgroundColor: ['#f2b53a', '#ff7a59', 'rgba(148,163,184,.14)'],
+              borderColor: '#0f1727', borderWidth: 2, borderRadius: 4, hoverOffset: 6,
+            }],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false, cutout: '74%',
+            animation: motion() ? { animateRotate: true, animateScale: false, duration: 900, easing: 'easeOutQuart' } : false,
+            plugins: {
+              legend: { display: false },
+              tooltip: { ...TOOLTIP, filter: (i) => i.dataIndex < 2, callbacks: { label: (i) => ` ${i.label}: ${i.parsed}` } },
+            },
+          },
+        });
+        updateStats(ctx);
+      },
+
+      legend() {
+        return `<div class="lg-title">Hotspots</div>
+          <div class="lg-row"><i class="sw brew"></i>Craft brewery</div>
+          <div class="lg-row"><i class="sw taco"></i>Taco shop</div>
+          <div class="lg-row"><i class="sw clu"></i>Cluster · ring = 🍺/🌮 split</div>
+          <div class="lg-row"><i class="sw line"></i>Crawl walk (≤ 1.5 mi)</div>`;
+      },
+    };
+  })();
+
+  // Registration order = chip order.
+  LayerRegistry.registerModule(Microclimates);
+  LayerRegistry.registerModule(Hotspots);
+
+  const app = new App();
+  app.boot();
+  window.SDXApp = app; // handy for debugging in the console
+
+  // ==================================================================
+  // MODULE 3 TEMPLATE: "Surf & Ocean"  (future extensibility example)
+  // ------------------------------------------------------------------
+  // To add a new visualizer, register ONE object. No core changes needed:
+  //
+  //   LayerRegistry.registerModule({
+  //     id, name, description, icon (lucide name), accent (css color),   // chip + headers
+  //     createState()            -> initial state object (kept across on/off)
+  //     bounds(ctx)              -> L.LatLngBounds to fly to when switched on
+  //     onActivate(ctx)          -> REQUIRED. Add layers to ctx.layer (core adds/removes it)
+  //     onDeactivate(ctx)        -> unhook map/bus listeners; core fades + clears ctx.layer
+  //     onStateChange(ctx, prev) -> react to ctx.setState({...})
+  //     onFrame(ctx, dt)         -> optional per-frame animation hook (shared rAF loop)
+  //     onFocus(ctx) / onBlur(ctx) -> this layer became / stopped being the focused one
+  //     renderControls(el, ctx)  -> build the floating dock UI when focused
+  //     renderSidebar(el, ctx)   -> build analytics; ctx.chart(canvas, cfg) auto-destroys
+  //     legend(ctx)              -> small HTML string for the legend stack
+  //   })
+  //
+  // ctx also carries: map, L, SDX (engine), data, bus (app-wide events), ui (per-render refs),
+  // util (esc, h, icon, fmtHour, heatColor, tweenNumber, TOOLTIP ...), toast(), flyTo(), motion().
+  //
+  // This demo is live code (not a dead comment) but only registers with ?surf=1 in the URL,
+  // so the default app ships with two modules. Because it registers AFTER boot, it also shows
+  // that late registration adds a chip automatically. It follows the Microclimates clock via
+  // the shared bus ('clock' event) when both layers are on.
+  // ==================================================================
+  if (new URLSearchParams(window.location.search).has('surf')) {
+    const BREAKS = [
+      { id: 'oceanside', name: 'Oceanside Pier', lat: 33.1934, lon: -117.3860, base: 3.2, swing: 1.1, phase: 0.0 },
+      { id: 'swamis', name: "Swami's", lat: 33.0345, lon: -117.2927, base: 3.8, swing: 1.4, phase: 1.5 },
+      { id: 'blacks', name: "Black's Beach", lat: 32.8890, lon: -117.2530, base: 4.6, swing: 1.6, phase: 0.8 },
+      { id: 'windansea', name: 'Windansea', lat: 32.8298, lon: -117.2810, base: 3.4, swing: 1.2, phase: 2.2 },
+      { id: 'tourmaline', name: 'Tourmaline', lat: 32.8055, lon: -117.2625, base: 2.4, swing: 0.8, phase: 3.1 },
+      { id: 'ob-pier', name: 'OB Pier', lat: 32.7497, lon: -117.2551, base: 3.0, swing: 1.0, phase: 1.1 },
+      { id: 'ib-pier', name: 'Imperial Beach Pier', lat: 32.5793, lon: -117.1330, base: 3.3, swing: 1.2, phase: 4.0 },
+    ];
+    const waveFt = (b, hour) => Math.max(0.5, b.base + b.swing * Math.sin(((hour + b.phase) / 12.4) * 2 * Math.PI));
+    let dots = [];
+    let unsubscribe = null;
+
+    const update = (ctx) => {
+      const { hour, minFt } = ctx.state;
+      for (const d of dots) {
+        const ft = waveFt(d.b, hour);
+        const on = ft >= minFt;
+        d.c.setRadius(6 + ft * 2.6);
+        d.c.setStyle({ opacity: on ? 1 : 0.25, fillOpacity: on ? 0.35 : 0.05 });
+        d.c.setTooltipContent(`${esc(d.b.name)} · ${ft.toFixed(1)} ft`);
+      }
+      if (ctx.ui.bars) {
+        ctx.ui.bars.data.datasets[0].data = BREAKS.map((b) => +waveFt(b, hour).toFixed(1));
+        ctx.ui.bars.update();
+      }
+      if (ctx.ui.label) ctx.ui.label.textContent = `${minFt.toFixed(1)} ft+ · ${fmtHour(hour)}`;
+    };
+
+    LayerRegistry.registerModule({
+      id: 'surf',
+      name: 'Surf & Ocean',
+      description: 'Simulated wave heights at 7 breaks (template module)',
+      icon: 'waves',
+      accent: '#22d3ee',
+      createState: () => ({ hour: 9, minFt: 0 }),
+      bounds: () => L.latLngBounds(BREAKS.map((b) => [b.lat, b.lon])),
+      onActivate(ctx) {
+        dots = BREAKS.map((b) => ({
+          b,
+          c: L.circleMarker([b.lat, b.lon], { color: '#22d3ee', weight: 2, fillColor: '#22d3ee', fillOpacity: 0.35 })
+            .bindTooltip(esc(b.name), { className: 'sdx-tip', direction: 'top' })
+            .addTo(ctx.layer),
+        }));
+        unsubscribe = ctx.bus.on('clock', ({ hour }) => { ctx.state.hour = hour; update(ctx); });
+        const clock = ctx.bus.last('clock'); // sync right away if another module already set the time
+        if (clock) ctx.state.hour = clock.hour;
+        update(ctx);
+      },
+      onDeactivate() { if (unsubscribe) unsubscribe(); unsubscribe = null; dots = []; },
+      onStateChange(ctx) { update(ctx); },
+      renderControls(el, ctx) {
+        el.innerHTML = `
+          <div class="dock-row"><span class="eyebrow">Minimum wave height</span><b class="mono surf-label"></b></div>
+          <div class="range-wrap" style="margin-top:10px"><input class="sdx-range plain" type="range" min="0" max="6" step="0.5" value="${ctx.state.minFt}" aria-label="Minimum wave height in feet"></div>
+          <p class="sub" style="margin-top:8px">Follows the Microclimates clock when both layers are on.</p>`;
+        ctx.ui.label = el.querySelector('.surf-label');
+        el.querySelector('input').addEventListener('input', (e) => ctx.setState({ minFt: Number(e.target.value) }));
+        update(ctx);
+      },
+      renderSidebar(el, ctx) {
+        el.innerHTML = `<section class="card"><div class="card-h"><h3>Wave height by break</h3><span class="muted">ft · simulated</span></div>
+          <div style="position:relative;height:240px"><canvas role="img" aria-label="Bar chart of simulated wave heights"></canvas></div></section>`;
+        ctx.ui.bars = ctx.chart(el.querySelector('canvas'), {
+          type: 'bar',
+          data: { labels: BREAKS.map((b) => b.name), datasets: [{ label: 'Wave height', data: BREAKS.map((b) => waveFt(b, ctx.state.hour)), backgroundColor: '#22d3ee', borderRadius: 4, maxBarThickness: 16 }] },
+          options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            scales: { x: { min: 0, max: 7, grid: { color: 'rgba(148,163,184,.08)' }, ticks: { callback: (v) => v + ' ft' } }, y: { grid: { display: false } } },
+            plugins: { legend: { display: false }, tooltip: { ...TOOLTIP, callbacks: { label: (i) => ` ${i.parsed.x.toFixed(1)} ft` } } },
+          },
+        });
+        update(ctx);
+      },
+      legend: () => '<div class="lg-title">Surf</div><div class="lg-row"><i class="sw surf"></i>Break (size = wave ft)</div>',
+    });
+  }
+})();
+</script>
+</body>
+</html>

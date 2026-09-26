@@ -1,0 +1,13 @@
+{
+  "name": "sd-multi-layer-explorer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Single-file Leaflet + Chart.js explorer for San Diego microclimates and taco/brewery crawls, built on a plugin LayerRegistry.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "lint": "node scripts/lint.mjs",
+    "build": "echo 'No build step: src/index.html is the whole app.'",
+    "serve": "python3 -m http.server 8105 --bind 127.0.0.1 -d src"
+  }
+}
