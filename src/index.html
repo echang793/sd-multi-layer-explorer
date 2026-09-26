@@ -161,6 +161,7 @@ body { margin: 0; overflow: hidden; font-family: Inter, ui-sans-serif, system-ui
   transition: transform .35s var(--ease-out), opacity .35s var(--ease-out), box-shadow .25s;
 }
 .sdx-temps-off .sdx-temp { opacity: 0; transform: scale(.4); pointer-events: none; }
+.mc-far .sdx-temp.tier-2 { opacity: 0; transform: scale(.4); pointer-events: none; }
 .sdx-temp .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); flex: none; }
 .sdx-temp .nm {
   font: 500 11.5px/1 Inter, sans-serif; color: var(--text-2); max-width: 0; opacity: 0; overflow: hidden;
@@ -182,7 +183,6 @@ body { margin: 0; overflow: hidden; font-family: Inter, ui-sans-serif, system-ui
 .sdx-pin.taco { --base: var(--taco); --hi: var(--taco-hi); }
 .sdx-pin .glyph { font-size: 16px; line-height: 1; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
 .sdx-icon:hover .sdx-pin { transform: translateY(-3px) scale(1.12); }
-.sdx-pin.is-hidden { opacity: 0; transform: scale(.25); pointer-events: none; }
 .sdx-pin.is-dim { opacity: .28; filter: saturate(.35); }
 .sdx-pin::after, .sdx-pin::before {
   content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid var(--hi); opacity: 0; pointer-events: none;
@@ -619,7 +619,12 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
   'use strict';
 
   // ------------------------------------------------------------------ data
-  const hood = (id, name, zone, lat, lon, offset = 0) => ({ id, name, zone, lat, lon, offset });
+  // Tier 1 temperature markers show at every zoom; tier 2 fade in once zoomed past 11,
+  // so the county view isn't a pile of overlapping pills over central San Diego.
+  const TIER_1 = new Set(['la-jolla', 'pacific-beach', 'coronado', 'del-mar', 'encinitas', 'oceanside', 'carlsbad',
+    'imperial-beach', 'downtown', 'north-park', 'chula-vista', 'kearny-mesa', 'el-cajon', 'escondido', 'santee',
+    'poway', 'rancho-bernardo', 'julian', 'alpine', 'ramona']);
+  const hood = (id, name, zone, lat, lon, offset = 0) => ({ id, name, zone, lat, lon, offset, tier: TIER_1.has(id) ? 1 : 2 });
 
   const NEIGHBORHOODS = [
     // Coastal
@@ -660,6 +665,11 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     hood('san-marcos', 'San Marcos', 'inland', 33.1434, -117.1661, 0),
     hood('fallbrook', 'Fallbrook', 'inland', 33.3764, -117.2512, -1),
     hood('lakeside', 'Lakeside', 'inland', 32.8573, -116.9222, 1),
+    hood('solana-beach', 'Solana Beach', 'coastal', 32.9912, -117.2711, 0),
+    hood('city-heights', 'City Heights', 'central', 32.7483, -117.0990, 0.5),
+    hood('lemon-grove', 'Lemon Grove', 'inland', 32.7426, -117.0314, -1.5),
+    hood('spring-valley', 'Spring Valley', 'inland', 32.7448, -116.9989, -1),
+    hood('san-ysidro', 'San Ysidro', 'central', 32.5520, -117.0430, 0.5),
   ];
 
   // County-wide breweries + taco shops from OpenStreetMap, baked in by scripts/fetch-pois.mjs.
@@ -675,15 +685,12 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     ["b-n1404687760","b","Ballast Point Brewery & Distillery",32.89858,-117.11096,0,"",""],
     ["b-n1914937399","b","Ballast Point Brewing & Home Brew Mart",32.76675,-117.19531,0,"5401 Linda Vista Road, San Diego",""],
     ["b-n3884049822","b","Ballast Point Tasting Room & Kitchen Restaurant",32.72767,-117.16968,0,"",""],
-    ["b-n4932661728","b","Barrel & Stave Tap house",33.20245,-117.2424,0,"206 Main Street, Vista",""],
     ["b-n4852890305","b","Battlemage Brewing Company",33.14033,-117.22746,0,"",""],
     ["b-n9215210435","b","Bay City Brewing Co Tasting Room",32.71202,-117.15724,0,"627 8th Avenue, San Diego",""],
-    ["b-n4978438221","b","Beer Company",32.71589,-117.15903,0,"",""],
     ["b-n4852919671","b","Belching Beaver Brewery",33.14495,-117.22891,0,"",""],
     ["b-n596681408","b","Belching Beaver Brewery Tavern and Grill",33.20212,-117.24103,0,"302 East Broadway, Vista","Mo-Fr 12:00-21:00"],
     ["b-n1791247876","b","Blind Lady Ale House",32.76348,-117.12028,0,"3416 Adams Avenue, San Diego",""],
     ["b-n3884034950","b","Bolt Brewery",32.72529,-117.16875,0,"",""],
-    ["b-n12146940539","b","Boochcraft",32.94979,-117.23387,0,"",""],
     ["b-n6549507497","b","Border X Brewing",32.69812,-117.13979,0,"2181 Logan Avenue","Su 10:00-20:00; Mo-Th 14:00-22:00; Fr-Sa 12:00-23:00"],
     ["b-n10628039199","b","Breakwater Brewing Co.",33.19509,-117.37912,0,"",""],
     ["b-n5870511623","b","Brewjeria Tap Room & Kitchen",32.6433,-117.08049,0,"241 3rd Avenue, Chula Vista",""],
@@ -692,7 +699,6 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     ["b-w363141081","b","Coronado Brewing Company",32.69787,-117.17329,0,"154 Orange Avenue, Coronado",""],
     ["b-w549619388","b","Coronado Brewing Company - Imperial Beach",32.58053,-117.13137,0,"875 Seacoast Drive, Imperial Beach",""],
     ["b-n9357102719","b","Creative Creature Brewing Company",32.79555,-116.96271,0,"110 North Magnolia Avenue, El Cajon",""],
-    ["b-n14111612005","b","Cutwater",32.88456,-117.16328,0,"9750 Distribution Avenue, San Diego",""],
     ["b-n9330877224","b","Dog Leg Brewing",33.13558,-117.23551,0,"Keystone Way",""],
     ["b-n12947444501","b","Eppig Brewing",33.13562,-117.23472,0,"1347 Keystone Way",""],
     ["b-n5190989421","b","Eppig Brewing",32.70877,-117.15756,0,"795 J Street",""],
@@ -705,8 +711,6 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     ["b-n5870511658","b","Groundswell Brewing Company",32.64266,-117.08065,0,"258 3rd Avenue","Mo-Th 12:00-22:00;Sa 11:00-00:00;Su 11:00-22:00"],
     ["b-n11173427237","b","Helix Brewing Company",32.77198,-117.02342,0,"8101 Commercial Street","Su 12:00-19:00; Mo-Th 15:00-21:00; Fr-Sa 12:00-22:00"],
     ["b-n1974496732","b","Hillcrest Brewing Company",32.74904,-117.14986,0,"1458 University Avenue, San Diego",""],
-    ["b-n8766582908","b","Hoppy Daze Tap House",32.57388,-117.05533,0,"1280 Picador Boulevard, San Diego",""],
-    ["b-n13017713001","b","Julian Beer Co.",33.07918,-116.60359,0,"2307 Main Street","Mo-Th 11:00-20:00; Fr 11:00-21:00; Sa-Su 10:00-21:00"],
     ["b-n596594460","b","Kairoa Brewing Company",32.76119,-117.14605,0,"4601 Park Boulevard, San Diego",""],
     ["b-w131923861","b","Karl Strauss Brewing",32.89654,-117.20179,0,"","Su-Th 11:00-21:00; Fr,Sa 11:00-22:00"],
     ["b-w654082323","b","Karl Strauss Brewing Co.",33.12444,-117.31404,0,"","Su-Th 11:00-21:00; Fr,Sa 11:00-22:00"],
@@ -717,8 +721,6 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     ["b-n7723071347","b","Kilowatt Brewing",32.83311,-117.15646,0,"7576 Clairemont Mesa Boulevard, San Diego","Mo-Th 15:00-22:00; Fr-Sa 12:00-24:00; Su 13:00-20:00"],
     ["b-n597068228","b","Little Bird Brewing",32.73938,-117.12547,0,"3176 Thorn Street, San Diego",""],
     ["b-n14021173513","b","Little Miss Brewing",32.93372,-117.06072,0,"12265 Scripps Poway Parkway, Poway",""],
-    ["b-n8232815545","b","Machete Beer House",32.66481,-117.09318,0,"",""],
-    ["b-n12170372073","b","Meadiocrity Mead",33.14338,-117.1938,0,"1365 Grand Avenue, San Marcos","We 17:00-21:00; Th 17:00-21:00; Fr 16:30-21:30; Sa 15:00-21:00; Su 14:00-18:00"],
     ["b-n596158252","b","Mike Hess Brewing",32.74771,-117.12848,0,"3812 Grim Avenue, San Diego","Su-Fr 12:00-22:00; Sa 12:00-23:00"],
     ["b-n5467441986","b","Mike Hess Brewing - Seaport Village Biergarten",32.70941,-117.17193,0,"",""],
     ["b-n11474726471","b","Mike Hess Brewing - Seaport Village Taphouse",32.7088,-117.16878,0,"",""],
@@ -728,21 +730,15 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     ["b-n5388224317","b","Mission Brewing (fka Rough Draft)",32.87544,-117.22302,0,"3869 Miramar Street, La Jolla","Mo-Su 18:00-22:00"],
     ["b-n6568889289","b","Modern Times Beer",32.75419,-117.20622,0,"3725 Greenwood Street, San Diego","Mo-Th 12:00-22:00; Fr 12:00-00:00; Sa 11:00-00:00; Su 11:00-22:00"],
     ["b-n11192125837","b","Mujeres Brew",32.70194,-117.14138,0,"","Sa-Su 12:00-21:00; Tu-Th 16:00-22:00; Fr 12:00-22:00"],
-    ["b-n13878422219","b","Newtopia Cyder",32.90325,-117.11071,0,"10045 Carroll Canyon Road, San Diego",""],
-    ["b-n13816079607","b","North Park Beer Co",32.74863,-117.12907,0,"3038 University Avenue",""],
     ["b-n13568754314","b","North Park Beer Company",32.73754,-117.1602,0,"3095 5th Avenue, San Diego",""],
     ["b-n8873711080","b","North Pine Brewing",32.94952,-117.23388,0,"",""],
     ["b-n12700512601","b","Novo Brazil Brewing",32.76839,-117.14698,0,"1640 Camino del Rio North",""],
     ["b-n9301890188","b","Novo Brazil Brewing",32.62339,-116.96713,0,"",""],
     ["b-n7179577182","b","O.B. Brewery",32.74722,-117.25196,0,"5041 Newport Avenue",""],
     ["b-w255173559","b","Oceanside Ale Works",33.21169,-117.27268,0,"1800 Ordway Way, Oceanside",""],
-    ["b-w31816397","b","Oggi's Pizza",32.95426,-117.22948,0,"12840 Carmel Country Road, San Diego",""],
-    ["b-n1741818469","b","Oggi's Pizza & Brewing Co.",32.77983,-117.12896,0,"2245 Fenton Parkway, San Diego",""],
-    ["b-n596649040","b","Oggi's Pizza and Brewing Co.",32.96549,-117.08979,0,"10155 Rancho Carmel Drive, San Diego",""],
     ["b-w31842625","b","Original 40 Brewing Company",32.74828,-117.12665,0,"3117 University Avenue, San Diego",""],
     ["b-n6313226248","b","Pariah Brewing Company",32.75572,-117.12875,0,"",""],
     ["b-n596439529","b","Pizza Port",32.99293,-117.27222,0,"135 Highway 101, Solana Beach","Mo-Su 11:00-22:00; Fr,Sa 11:00-24:00"],
-    ["b-w31841926","b","Pizza Port",32.74799,-117.25036,0,"1956 Bacon Street, San Diego",""],
     ["b-w405142153","b","Pizza Port",33.15985,-117.34775,0,"571 Carlsbad Village Drive, Carlsbad",""],
     ["b-w722994058","b","Pizza Port",33.12866,-117.25002,0,"",""],
     ["b-w1268969029","b","Pizza Port Brewing Company",32.58421,-117.12947,0,"204 Palm Avenue, Imperial Beach",""],
@@ -767,7 +763,6 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     ["b-n2699524137","b","Stone Brewing World Bistro & Gardens",32.74042,-117.21153,0,"2816 Historic Decatur Road, San Diego","Mo-Fr, Su 11:30-21:00; Sa 11:30-22:00"],
     ["b-w97906041","b","Stone Brewing World Bistro & Gardens",33.11648,-117.12003,0,"",""],
     ["b-n11192190037","b","The Church by The Lost Abbey",32.70925,-117.15244,0,"1313 J Street","Su 13:00-20:00; Mo-We 14:00-21:00; Th-Sa 14:00-22:00"],
-    ["b-n5897657085","b","The Cork and Craft",33.02361,-117.08593,0,"",""],
     ["b-n10164930455","b","The Lost Abbey",33.09874,-117.1993,0,"1215 San Elijo Road, San Marcos",""],
     ["b-n8616322347","b","Viewpoint Brewing Company",32.97,-117.26192,0,"2201 San Dieguito Drive, Del Mar",""],
     ["b-n596378228","b","Villains Brewing Company",32.71025,-117.15627,0,"903 Island Avenue, San Diego","Mo-Th,Su 11:00-22:00; Fr-Sa 11:00-23:00"],
@@ -825,7 +820,6 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     ["t-n6636188223","t","Cotijas Taco Shop",32.82125,-117.10031,0,"10645 Tierrasanta Boulevard, San Diego",""],
     ["t-n11474729369","t","Crack Taco Shop",32.70859,-117.16896,0,"",""],
     ["t-n9080829442","t","Crack Tacos",32.78022,-117.103,0,"",""],
-    ["t-n13022126885","t","Craftcoast Beer and Tacos",33.19465,-117.38131,0,"257 Mission Avenue, Oceanside","Mo-Fr 12:00-22:00, Sa-Su 11:00-22:00"],
     ["t-n13973688619","t","D'Sotos Mexican Food",32.89502,-117.12825,0,"9272 Miramar Road, San Diego",""],
     ["t-n9270946538","t","Daniel's Taco Shop",32.78802,-116.94414,0,"1104 East Washington Avenue, El Cajon",""],
     ["t-n894762458","t","David's Homestyle Fresh Mexican",32.74505,-116.92799,0,"2451 Jamacha Road, El Cajon",""],
@@ -860,7 +854,6 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     ["t-w31804294","t","Filiberto's Mexican Food",32.75366,-117.21713,0,"",""],
     ["t-w981837972","t","Filibertos",32.77864,-117.01876,0,"",""],
     ["t-n596898002","t","Frida's Taqueria",32.71086,-117.16121,0,"532 4th Avenue, San Diego",""],
-    ["t-n13271640271","t","Fruity Loco",32.70725,-117.00981,0,"507 Sweetwater Road, Spring Valley","Sa-Th 09:00-21:00; Fr 09:00-20:00"],
     ["t-w1306082055","t","Gabriel's Taco Stand",32.82014,-117.17737,0,"",""],
     ["t-n13384025724","t","Gualberto's Taco Shop",32.70957,-117.0638,0,"",""],
     ["t-n7732677555","t","Gualberto's Taco Shop #2",32.83272,-117.13832,0,"5447 Kearny Villa Road, San Diego","Mo-Fr 06:00-21:00; Sa 06:00-19:00; Su 07:00-18:00"],
@@ -923,8 +916,6 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     ["t-n8916831777","t","Mariscos La Morena",32.75625,-117.09205,2,"4750 El Cajon Boulevard, San Diego","Mo-Su 10:00-19:00"],
     ["t-n9408869085","t","Marlen's Taco Shop",32.71425,-117.00688,0,"8921 Jamacha Road, Spring Valley",""],
     ["t-n7709004441","t","Mauricio's",32.83066,-117.13918,0,"5375 Kearny Villa Road, San Diego",""],
-    ["t-w97506224","t","Mawazo Kitchen",33.09706,-116.99976,0,"",""],
-    ["t-n8039112711","t","Maya's Gourmet Pizza",32.54677,-117.03308,0,"660 East San Ysidro Boulevard, San Ysidro",""],
     ["t-n4049238959","t","Mexico Viejo",33.04508,-117.25719,0,"1465 Encinitas Boulevard, Encinitas",""],
     ["t-n1429584701","t","Mike's Red Tacos",32.82158,-117.18359,0,"4310 Genesee Avenue, San Diego",""],
     ["t-w31818773","t","Mike's Red Tacos",32.91683,-117.12732,0,"9089 Mira Mesa Boulevard, San Diego","Mo-Th,Su 11:00-23:00; Fr-Sa 11:00-00:00"],
@@ -1024,11 +1015,9 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     ["t-n13328811390","t","Tacos El Vaquero",32.72345,-117.22894,0,"1310 Scott Street, San Diego","Tu 12:00-24:00; We-Sa 00:00-01:00,12:00-24:00; Su 00:00-01:00"],
     ["t-w959856786","t","Taqueria By El Prieto",32.63019,-117.09328,0,"689 H Street, Chula Vista","Mo-Su 11:00-21:00"],
     ["t-n9215079107","t","Taquería Los Chuchys",32.711,-117.1609,0,"543 4th Avenue, San Diego",""],
-    ["t-n3271743264","t","Taqueria Los Corrales",32.75299,-117.20445,0,"",""],
     ["t-n1364078883","t","Taqueria Morelos Mexican Food",33.12941,-117.06684,0,"",""],
     ["t-n6531146967","t","Taqueria Revolucion",32.64836,-117.05937,0,"3001 Bonita Road, Chula Vista","Mo-Su 10:30-21:00"],
     ["t-w31803181","t","Taqueria Revolucion",32.55062,-117.03833,0,"362 East San Ysidro Boulevard",""],
-    ["t-n8713898677","t","Teresitas Fruiteria",32.58473,-117.03862,0,"4370 Palm Avenue, San Diego","Mo-Su 07:00-23:00"],
     ["t-n9247399844","t","The Burrito Factory",32.93389,-117.06078,0,"12265 Scripps Poway Parkway, Poway",""],
     ["t-n13368213933","t","The Craft Taco",32.91275,-117.23179,0,"11585 Sorrento Valley Road, San Diego","Mo,Tu,We,Th,Sa 11:00-20:00; Fr 11:00-21:00; Su 11:00-17:00"],
     ["t-n13376986759","t","The Craft Taco at The Nat",32.73208,-117.1473,0,"1788 El Prado, San Diego","Mo-Su 10:00-16:30"],
@@ -1045,20 +1034,23 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     ["t-w545144541","t","Trujillo's Taco Shop",32.76582,-117.0602,0,"6450 El Cajon Boulevard, San Diego","08:00-24:00; 00:00-03:00"],
     ["t-w31803427","t","Tulum Seafood",32.91164,-117.14355,2,"10631 Camino Ruiz, San Diego","Mo-Su 09:00-21:00"],
     ["t-n6357267192","t","Tutu Taco",32.60389,-117.05133,0,"",""],
-    ["t-n9443729914","t","Valentinas Taco Shop",32.56907,-117.00463,0,"6051 Business Center Court, San Diego","Mo-Fr 07:00-18:00, Sa 08:00-14:00"],
-    ["t-n1011332086","t","Valerie's Taco Shop",33.20942,-117.31219,0,"",""],
-    ["t-n6720075159","t","Valerie’s Taco Shop",33.10501,-117.26616,0,"6986 El Camino Real","Mo-Sa 07:00-22:00; Su 07:00-15:00"],
     ["t-w31817341","t","Vallarta Express",32.91675,-117.12427,0,"9313 Mira Mesa Boulevard, San Diego",""],
     ["t-w688368721","t","Vallarta Express",32.77691,-117.01648,1,"5341 Jackson Drive, La Mesa","24/7"],
     ["t-w913387313","t","Vallarta Express",33.16253,-117.34481,0,"2952 Harding Street, Carlsbad",""],
     ["t-n654005566","t","Vallerta Express",32.82134,-117.18257,0,"",""],
     ["t-w993796388","t","Victoria Mexican Food",32.79474,-116.95471,0,"677 East Main Street, El Cajon",""],
     ["t-n8703595240","t","Victoria's Mexican Grill",32.57672,-117.09246,0,"1912 Coronado Avenue, San Diego","Mo-Su 11:00-23:00"],
-    ["t-w1178512215","t","Wings Mix",32.82631,-116.93331,0,"8215 Winter Gardens Boulevard, Lakeside",""],
   ];
   /* POI-DATA:END */
 
-  // Nearest neighborhood center, used as each spot's "area" for grouping and dimming.
+  // A spot's area: the city in its street address when that names a known area,
+  // otherwise the nearest neighborhood center.
+  const HOOD_BY_NAME = new Map(NEIGHBORHOODS.map((n) => [n.name, n.id]));
+  const addrCity = (addr) => (addr || '').split(', ')[1] || '';
+  function hoodFor(lat, lon, addr) {
+    return HOOD_BY_NAME.get(addrCity(addr)) || nearestHood(lat, lon);
+  }
+
   function nearestHood(lat, lon) {
     const k = Math.cos((lat * Math.PI) / 180);
     let best = NEIGHBORHOODS[0];
@@ -1081,7 +1073,7 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
   const LANDMARKS = POI_ROWS.map(([id, t, name, lat, lon, flags, addr, hours]) => ({
     id, name, lat, lon, addr, hours,
     type: t === 'b' ? 'brewery' : 'taco',
-    hood: nearestHood(lat, lon),
+    hood: hoodFor(lat, lon, addr),
     tags: {
       hazyIPA: t === 'b' && simulatedHazy(id),
       open247: t === 't' && (flags & 1) === 1,
@@ -1208,6 +1200,10 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     return tagged.filter((p) => tagged.some((q) => q.type !== p.type && haversineMi(p, q) <= CRAWL_RADIUS_MI));
   }
 
+  // Only tags that are TRUE for a spot get shown; absent tags are never rendered.
+  const TAG_LABELS = { hazyIPA: 'Hazy IPA', open247: '24/7', bajaFish: 'Seafood' };
+  const activeLabels = (p) => Object.keys(TAG_LABELS).filter((k) => p.tags[k]).map((k) => TAG_LABELS[k]);
+
   // ------------------------------------------------------------------ events + registry
   class EventBus {
     constructor() { this._handlers = new Map(); this._last = new Map(); }
@@ -1261,6 +1257,9 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     geo: { haversineMi, walkMinutes, WALK_MPH, ROUTE_FACTOR },
     crawl: { nearestTacos, RADIUS_MI: CRAWL_RADIUS_MI },
     filters: { applyFilters },
+    tags: { LABELS: TAG_LABELS, activeLabels },
+    // Label for where a spot is: its real address city if known, else its area.
+    placeLabel: (p) => addrCity(p.addr) || (NEIGHBORHOODS.find((n) => n.id === p.hood) || {}).name || '',
     EventBus,
     ModuleRegistry,
     LayerRegistry,
@@ -1734,6 +1733,7 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
     let fogTex = null;
     let ambient = null;
     let onMapMove = null;
+    let onZoomTier = null;
     let onPopupOpen = null;
     let onPopupClose = null;
     let openPin = null;
@@ -1956,6 +1956,9 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         };
         map.on('move zoomend viewreset resize', onMapMove);
         onMapMove();
+        onZoomTier = () => map.getContainer().classList.toggle('mc-far', map.getZoom() < 11);
+        map.on('zoomend', onZoomTier);
+        onZoomTier();
 
         const center = map.getCenter();
         const ranked = SDX.DATA.neighborhoods
@@ -1966,7 +1969,7 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
             keyboard: true, riseOnHover: true,
             icon: L.divIcon({
               className: 'sdx-icon', iconSize: [0, 0], iconAnchor: [0, 0],
-              html: `<div class="sdx-anchor"><div class="sdx-temp" style="--i:${rank}"><span class="dot"></span><span class="t">--°</span><span class="nm">${esc(n.name)}</span></div></div>`,
+              html: `<div class="sdx-anchor"><div class="sdx-temp${n.tier === 2 ? ' tier-2' : ''}" style="--i:${rank}"><span class="dot"></span><span class="t">--°</span><span class="nm">${esc(n.name)}</span></div></div>`,
             }),
           }).addTo(ctx.layer);
           m.bindPopup('', { offset: [0, -12], maxWidth: 260, minWidth: 220, autoPanPaddingTopLeft: [20, 90] });
@@ -1995,6 +1998,8 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         ctx.state.playing = false;
         map.getContainer().classList.remove('sdx-temps-off');
         map.off('move zoomend viewreset resize', onMapMove);
+        map.off('zoomend', onZoomTier);
+        map.getContainer().classList.remove('mc-far');
         map.off('popupopen', onPopupOpen);
         map.off('popupclose', onPopupClose);
         const amb = ambient;
@@ -2238,7 +2243,6 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       { key: 'open247', label: '24/7 Taco Shops', hint: 'per OSM hours', icon: 'clock' },
       { key: 'bajaFish', label: 'Mariscos / Baja', hint: 'seafood spots', icon: 'fish' },
     ];
-    const TAG_LABELS = { hazyIPA: 'Hazy IPA', open247: '24/7', bajaFish: 'Seafood' };
     const BREW = '#c98500';
     const TACO = '#e5484d';
 
@@ -2295,12 +2299,12 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         html: `<div class="sdx-anchor"><div class="sdx-cluster" style="--pb:${Math.round((b / n) * 100)}%;--s:${size}px" title="${b} breweries · ${n - b} taco shops"><b class="mono">${n}</b></div></div>`,
       });
     }
-    const tagsFor = (p) => (p.type === 'brewery' ? ['hazyIPA'] : ['open247', 'bajaFish']);
+    const tagChips = (p) => SDX.tags.activeLabels(p).map((t) => `<span class="tag on">${t}</span>`).join('');
 
     function poiPopup(ctx, p) {
-      const hoodName = HOODS.get(p.hood)?.name ?? '';
+      const hoodName = SDX.placeLabel(p);
       const isBrew = p.type === 'brewery';
-      const tags = tagsFor(p).map((k) => `<span class="tag ${p.tags[k] ? 'on' : ''}">${TAG_LABELS[k]}</span>`).join('');
+      const tags = tagChips(p);
       let foot = '';
       if (isBrew) {
         const near = SDX.crawl.nearestTacos(p, visible(ctx), { max: 1, radiusMi: 5 })[0];
@@ -2313,8 +2317,8 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
       return `<div class="pp-head"><span class="badge" style="--bc:${isBrew ? '#f2b53a' : '#ff7a59'}">${isBrew ? '🍺 Brewery' : '🌮 Taco shop'}</span><span class="muted">${esc(hoodName)}</span></div>
         <div class="pp-name">${esc(p.name)}</div>
         ${p.addr ? `<div class="muted" style="margin-top:2px">${esc(p.addr)}</div>` : ''}
-        ${p.hours ? `<div class="muted mono" style="margin-top:2px;font-size:11px">${esc(p.hours)}</div>` : ''}
-        <div class="tagrow">${tags}</div>
+        ${p.hours && p.hours !== '24/7' ? `<div class="muted mono" style="margin-top:2px;font-size:11px">${esc(p.hours)}</div>` : ''}
+        ${tags ? `<div class="tagrow">${tags}</div>` : ''}
         ${foot ? `<div class="pp-foot">${foot}</div>` : ''}
         <div class="pp-note">Location &amp; hours: OpenStreetMap${isBrew ? ' · Hazy IPA tag is simulated' : ''}</div>`;
     }
@@ -2459,13 +2463,13 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
         const total = targets.reduce((a, r) => a + r.minutes, 0);
         box.innerHTML = `
           <div class="flex items-center justify-between gap-2">
-            <div class="min-w-0"><div class="pp-name" style="font-size:14px">${esc(b.name)}</div><div class="muted">${esc(HOODS.get(b.hood).name)} · start here</div></div>
+            <div class="min-w-0"><div class="pp-name" style="font-size:14px">${esc(b.name)}</div><div class="muted">${esc(SDX.placeLabel(b))} · start here</div></div>
             <button type="button" class="btn clear">${icon('x')}Clear</button>
           </div>
           <div class="steps">${targets.length ? targets.map((r, i) => `
             <button type="button" class="step" data-id="${r.poi.id}" style="animation-delay:${i * 70}ms">
               <span class="n mono">${i + 1}</span>
-              <span class="min-w-0"><span class="t block truncate">${esc(r.poi.name)}</span><span class="m">${tagsFor(r.poi).filter((k) => r.poi.tags[k]).map((k) => TAG_LABELS[k]).join(' · ') || 'Classic taco shop'}</span></span>
+              <span class="min-w-0"><span class="t block truncate">${esc(r.poi.name)}</span><span class="m">${SDX.tags.activeLabels(r.poi).join(' · ') || 'Taco shop'}</span></span>
               <span class="w mono">${fmtMi(r.miles)} · ${r.minutes}m</span>
             </button>`).join('') : '<div class="muted">No taco shops within 1.5 mi with the current filters.</div>'}
           </div>

@@ -27,13 +27,27 @@ area["name"="San Diego County"]["boundary"="administrative"]["admin_level"="6"]-
 out center tags;`;
 
 // National / big regional chains: not what a taco-and-brew crawl is for.
-const CHAINS = /taco bell|del taco|chipotle|jack in the box|el pollo loco|taco john|qdoba|baja fresh|rubio'?s|wahoo'?s|on the border|chuy'?s|el torito|green burrito|carl'?s|taco cabana|poquito mas|bj'?s|yard house|rock ?bottom|gordon biersch|miller'?s ale/i;
+const CHAINS = /oggi'?s|taco bell|del taco|chipotle|jack in the box|el pollo loco|taco john|qdoba|baja fresh|rubio'?s|wahoo'?s|on the border|chuy'?s|el torito|green burrito|carl'?s|taco cabana|poquito mas|bj'?s|yard house|rock ?bottom|gordon biersch|miller'?s ale/i;
 
-const isBrewery = (t) =>
-  t.craft === 'brewery' || t.microbrewery === 'yes' || /brew(ing|ery|ers|pub)|beer co|ale ?works/i.test(t.name || '');
-const isTacoShop = (t) =>
-  /taco|taquer/i.test(t.name || '') || /taco/.test(t.cuisine || '') ||
-  (t.amenity === 'fast_food' && /mexican/.test(t.cuisine || ''));
+// Places OSM tags as breweries/microbreweries that aren't beer makers: kombucha, cider, mead,
+// spirits, and taphouses/bars that only pour. A name that says Brew(ing|ery) always stays.
+const NOT_BREWERY = /kombucha|booch|cider|cyder|mead|cutwater|spirits|tap ?house|beer house|cork and craft|^(the )?beer company$/i;
+// Mis-tagged "mexican" spots that aren't taco shops.
+const NOT_TACO = /pizza|wings|frut|fruit|mawazo|donut|boba|poke|sushi|burger|ice cream|paleter/i;
+
+const isBrewery = (t) => {
+  const name = t.name || '';
+  if (/brew(ing|ery|ers|pub)/i.test(name)) return true;
+  if (NOT_BREWERY.test(name)) return false;
+  return t.craft === 'brewery' || t.microbrewery === 'yes' || /ale ?works/i.test(name);
+};
+const isTacoShop = (t) => {
+  const name = t.name || '';
+  if (/taco|taquer/i.test(name)) return true;
+  if (NOT_TACO.test(name)) return false;
+  return /taco/.test(t.cuisine || '') || (t.amenity === 'fast_food' && /mexican/.test(t.cuisine || ''));
+};
+const looksLikeBrewery = (t) => /brew|beer|ale/i.test(t.name || '') || t.craft === 'brewery' || t.microbrewery === 'yes';
 
 function fail(msg) {
   console.error(`fetch-pois: ${msg}`);
@@ -72,7 +86,7 @@ for (const e of json.elements) {
   const lon = e.lon ?? e.center?.lon;
   if (!t.name || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
   if (CHAINS.test(t.name) || CHAINS.test(t.brand || '')) continue;
-  const type = isBrewery(t) ? 'b' : isTacoShop(t) ? 't' : null;
+  const type = isBrewery(t) ? 'b' : !looksLikeBrewery(t) && isTacoShop(t) ? 't' : null;
   if (!type) continue;
   let flags = 0;
   if (type === 't' && t.opening_hours === '24/7') flags |= 1;
@@ -84,9 +98,19 @@ for (const e of json.elements) {
   });
 }
 
-// Drop duplicates: the same place mapped as both a node and a building (same type,
-// same normalized name, within 150 m).
+// Drop duplicates: the same place mapped twice (node + building, or "Pizza Port" next to
+// "Pizza Port Ocean Beach"). Same type, and either the same normalized name within 150 m or
+// one name a prefix of the other within 60 m. Keeps the longer name; merges address/hours.
 const norm = (s) => s.toLowerCase().replace(/\b(the|brewing|brewery|company|co|tasting room|taproom|restaurant)\b/g, '').replace(/[^a-z0-9]/g, '');
+const flat = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+const samePlace = (a, b) => {
+  if (a.type !== b.type) return false;
+  const m = distM(a, b);
+  if (norm(a.name) === norm(b.name) && m < 150) return true;
+  if (m > 60) return false;
+  const [x, y] = [flat(a.name), flat(b.name)].sort((p, q) => p.length - q.length);
+  return y.startsWith(x.slice(0, Math.max(6, x.length - 8)));
+};
 const distM = (a, b) => {
   const k = Math.PI / 180;
   const x = (b.lon - a.lon) * k * Math.cos(((a.lat + b.lat) / 2) * k);
@@ -95,8 +119,14 @@ const distM = (a, b) => {
 };
 const kept = [];
 for (const r of rows.sort((a, b) => a.id.localeCompare(b.id))) {
-  const dup = kept.find((k) => k.type === r.type && norm(k.name) === norm(r.name) && distM(k, r) < 150);
-  if (dup) { if (!dup.addr && r.addr) dup.addr = r.addr; if (!dup.hours && r.hours) dup.hours = r.hours; continue; }
+  const dup = kept.find((k) => samePlace(k, r));
+  if (dup) {
+    if (r.name.length > dup.name.length) dup.name = r.name;
+    if (!dup.addr && r.addr) dup.addr = r.addr;
+    if (!dup.hours && r.hours) dup.hours = r.hours;
+    dup.flags |= r.flags;
+    continue;
+  }
   kept.push(r);
 }
 kept.sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));

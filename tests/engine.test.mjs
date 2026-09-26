@@ -53,6 +53,23 @@ test('dataset: every zone needed by the chart is populated', () => {
   }
 });
 
+test('dataset: temperature markers are tiered so county zoom stays readable', () => {
+  // Sanity-check regression: 38 markers piled up over central San Diego at county zoom.
+  // Tier 1 shows at every zoom; tier 2 only once zoomed in.
+  const spec = ['La Jolla', 'Pacific Beach', 'Coronado', 'El Cajon', 'Escondido', 'Santee', 'Poway', 'Downtown', 'North Park', 'Chula Vista'];
+  for (const n of neighborhoods) assert.ok(n.tier === 1 || n.tier === 2, `${n.id} tier ${n.tier}`);
+  for (const name of spec) assert.equal(neighborhoods.find((n) => n.name === name).tier, 1, name);
+  const t1 = neighborhoods.filter((n) => n.tier === 1);
+  assert.ok(t1.length >= 12 && t1.length <= 22, `tier-1 count ${t1.length}`);
+  for (const z of ['coastal', 'central', 'inland', 'mountain']) assert.ok(t1.some((n) => n.zone === z), `no tier-1 ${z}`);
+  for (let i = 0; i < t1.length; i++) {
+    for (let j = i + 1; j < t1.length; j++) {
+      const d = haversineMi(t1[i], t1[j]);
+      assert.ok(d >= 2.25, `${t1[i].name} and ${t1[j].name} only ${d.toFixed(1)} mi apart at tier 1`);
+    }
+  }
+});
+
 test('dataset: landmarks are breweries or taco shops tied to a known neighborhood', () => {
   const hoodIds = new Set(neighborhoods.map((n) => n.id));
   for (const p of landmarks) {
@@ -79,6 +96,54 @@ test('dataset: spots cover the whole county, not just the coast and downtown', (
     assert.ok(tacos >= 10, `${name}: only ${tacos} taco shops`);
     assert.ok(brews >= 2, `${name}: only ${brews} breweries`);
   }
+});
+
+test('dataset: no non-beer "breweries" or non-taco "taco shops"', () => {
+  // Sanity-check regressions: kombucha, cider, mead, spirits, taphouses and a sports bar
+  // were in the brewery list; a pizza place, wings and fruit shops were in the taco list.
+  const notBrewery = /kombucha|booch|cider|cyder|mead|cutwater|tap ?house|beer house|cork and craft|^beer company$|oggi/i;
+  const notTaco = /pizza|wings|frut|fruit|mawazo/i;
+  // A brewery's own taproom ("Mike Hess Brewing - Seaport Village Taphouse") is fine.
+  const badB = landmarks.filter((p) => p.type === 'brewery' && notBrewery.test(p.name) && !/brew(ing|ery)/i.test(p.name)).map((p) => p.name);
+  // A real taquería that also sells fruit ("... Taqueria, Fruit & Deli") is fine.
+  const badT = landmarks.filter((p) => p.type === 'taco' && notTaco.test(p.name) && !/taco|taquer/i.test(p.name)).map((p) => p.name);
+  assert.deepEqual(Array.from(badB), []);
+  assert.deepEqual(Array.from(badT), []);
+});
+
+test('dataset: no duplicate listings of the same place', () => {
+  // Regression: "Pizza Port" and "Pizza Port Ocean Beach" 8 m apart were the same brewpub.
+  const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const dups = [];
+  for (let i = 0; i < landmarks.length; i++) {
+    for (let j = i + 1; j < landmarks.length; j++) {
+      const a = landmarks[i];
+      const b = landmarks[j];
+      if (a.type !== b.type || haversineMi(a, b) * 1609 > 60) continue;
+      const [x, y] = [norm(a.name), norm(b.name)].sort((m, n) => m.length - n.length);
+      if (y.startsWith(x.slice(0, Math.max(6, x.length - 8)))) dups.push(`${a.name} ~ ${b.name}`);
+    }
+  }
+  assert.deepEqual(dups, []);
+});
+
+test('dataset: area follows the street-address city when it names a known area', () => {
+  // Regression: Spring Valley spots showed as "La Mesa", San Ysidro as "Imperial Beach",
+  // Solana Beach as "Del Mar" because area was just the nearest neighborhood center.
+  const byName = new Map(neighborhoods.map((n) => [n.name, n.id]));
+  for (const want of ['Spring Valley', 'Lemon Grove', 'San Ysidro', 'Solana Beach', 'City Heights']) {
+    assert.ok(byName.has(want), `missing area ${want}`);
+  }
+  let checked = 0;
+  for (const p of landmarks) {
+    const city = (p.addr || '').split(', ')[1];
+    if (!city || !byName.has(city)) continue;
+    checked++;
+    assert.equal(p.hood, byName.get(city), `${p.name} (${city}) filed under ${p.hood}`);
+  }
+  assert.ok(checked > 20, `only ${checked} spots had a matching city`);
+  const sv = landmarks.find((p) => (p.addr || '').endsWith('Spring Valley'));
+  assert.equal(SDX.placeLabel(sv), 'Spring Valley');
 });
 
 test('dataset: national chains are excluded', () => {
@@ -281,6 +346,24 @@ test('registry: validates, rejects duplicates, preserves order, emits events', (
   assert.throws(() => reg.registerModule({ id: 'x', name: 'X' }), /onActivate/i);
   assert.throws(() => reg.registerModule(null), /object/i);
   assert.equal(reg.list().length, 2);
+});
+
+test('tags: activeLabels lists only tags that are true for that spot', () => {
+  // Regression: popups rendered every tag chip (false ones only dimmed), so every taco
+  // shop appeared to claim "24/7" and "Seafood".
+  const { activeLabels } = SDX.tags;
+  const plain = landmarks.find((p) => p.type === 'taco' && !p.tags.open247 && !p.tags.bajaFish);
+  assert.deepEqual(Array.from(activeLabels(plain)), []);
+  const late = landmarks.find((p) => p.type === 'taco' && p.tags.open247);
+  assert.ok(Array.from(activeLabels(late)).includes('24/7'));
+  const sea = landmarks.find((p) => p.type === 'taco' && p.tags.bajaFish);
+  assert.ok(Array.from(activeLabels(sea)).includes('Seafood'));
+  for (const p of landmarks) {
+    const labels = Array.from(activeLabels(p));
+    assert.equal(labels.includes('24/7'), p.tags.open247, p.id);
+    assert.equal(labels.includes('Seafood'), p.tags.bajaFish, p.id);
+    assert.equal(labels.includes('Hazy IPA'), p.tags.hazyIPA, p.id);
+  }
 });
 
 test('registry: accepts onFocus/onBlur hooks and rejects non-function values', () => {
