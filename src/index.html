@@ -1937,6 +1937,14 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
 
     flyTo(bounds, opts = {}) {
       if (!bounds || !bounds.isValid || !bounds.isValid()) return;
+      const size = this.map.getSize();
+      if (!size.x || !size.y) {
+        // Container has no pixel size yet (e.g. first paint hasn't landed) — fitBounds/flyToBounds
+        // divide by map size internally and hand back NaN coords. Just center; a resize/invalidateSize
+        // will reflow the view once the container has real dimensions.
+        this.map.setView(bounds.getCenter(), Math.min(this.map.getZoom(), opts.maxZoom ?? 12.5), { animate: false });
+        return;
+      }
       const wide = window.innerWidth >= 900;
       // Keep data clear of the sidebar (right) and the dock (bottom-left), measured live.
       const sideW = wide && this.sidebarOpen ? this.sidebar.offsetWidth + 28 : 16;
