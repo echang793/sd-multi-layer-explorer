@@ -6,6 +6,8 @@
 <title>SD Multi-Layer Explorer</title>
 <meta name="description" content="San Diego microclimates, marine layer and taco & brewery crawls on one extensible map.">
 <meta name="theme-color" content="#070b14">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b1020'/%3E%3Cpath d='M16 6 5 12l11 6 11-6-11-6Zm-11 11 11 6 11-6M5 22l11 6 11-6' fill='none' stroke='%2338bdf8' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -140,7 +142,11 @@ body { margin: 0; overflow: hidden; font-family: Inter, ui-sans-serif, system-ui
   font: 500 11px/1.2 "JetBrains Mono", monospace; box-shadow: 0 6px 18px -6px rgba(242,181,58,.45);
   animation: sdx-rise .5s var(--ease-out) backwards; animation-delay: calc(.55s + var(--d, 0) * .14s);
 }
+.crawl-tip .ct.is-closed { border-color: rgba(229,72,77,.6); }
 .crawl-tip .ct b { color: #fff; font-weight: 600; }
+.crawl-tip .ct em { font-style: normal; margin-left: 7px; padding: 1px 6px; border-radius: 999px; font-size: 10px; }
+.crawl-tip .ct em.bad { background: rgba(229,72,77,.28); color: #ffb0b3; }
+.crawl-tip .ct em.warn { background: rgba(232,162,26,.28); color: #ffd98a; }
 .crawl-tip .ci { display: inline-grid; place-items: center; width: 15px; height: 15px; margin-right: 6px; border-radius: 50%; font-style: normal; font-size: 9.5px; color: #1a1203; background: var(--brew-hi); vertical-align: -2px; }
 
 /* Marker anchors: Leaflet positions .sdx-icon; we center the child and animate the grandchild */
@@ -181,6 +187,11 @@ body { margin: 0; overflow: hidden; font-family: Inter, ui-sans-serif, system-ui
   transition: transform .4s var(--ease-out), opacity .4s var(--ease-out), filter .4s;
 }
 .sdx-pin.taco { --base: var(--taco); --hi: var(--taco-hi); }
+.sdx-pin .soon { position: absolute; right: -5px; top: -5px; width: 13px; height: 13px; border-radius: 50%; border: 2px solid #0b1020; background: #e8a21a; opacity: 0; transform: scale(.3); pointer-events: none; transition: opacity .35s var(--ease-out), transform .45s var(--ease-spring); }
+.sdx-pin[data-soon] .soon { opacity: 1; transform: scale(1); }
+.sdx-pin[data-soon="closing"] .soon { animation: sdx-blip 1.8s ease-in-out infinite; }
+.sdx-pin[data-soon="opening"] .soon { background: #35c48b; }
+@keyframes sdx-blip { 50% { transform: scale(1.3); } }
 .sdx-pin .glyph { font-size: 16px; line-height: 1; filter: drop-shadow(0 1px 1px rgba(0,0,0,.4)); }
 .sdx-icon:hover .sdx-pin { transform: translateY(-3px) scale(1.12); }
 .sdx-pin.is-dim { opacity: .28; filter: saturate(.35); }
@@ -499,6 +510,16 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
 .step .n { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; color: #fff; background: radial-gradient(circle at 32% 26%, var(--taco-hi), var(--taco)); }
 .step .t { font-size: 12.5px; font-weight: 500; }
 .step .m { font-size: 11px; color: var(--text-3); }
+.step .m.open { color: #86efac; } .step .m.closed { color: #fca5a5; } .step .m.warn { color: #ffd98a; }
+.crawl-sum { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.crawl-sum .pill { padding: 3px 9px; border-radius: 999px; font-size: 11px; color: var(--text-2); background: rgba(255,255,255,.06); border: 1px solid var(--hair); }
+.crawl-sum .pill b { color: var(--text); font-weight: 600; }
+.crawl-warn { display: flex; gap: 8px; margin-top: 8px; padding: 8px 10px; border-radius: 10px; font-size: 11.5px; line-height: 1.4; background: rgba(229,72,77,.12); border: 1px solid rgba(229,72,77,.36); color: #ffc2c4; animation: sdx-rise .45s var(--ease-out) backwards; }
+.crawl-warn.tight { background: rgba(232,162,26,.12); border-color: rgba(232,162,26,.4); color: #ffe0a0; }
+.open-line { display: flex; align-items: center; gap: 7px; margin: -2px 0 10px; font-size: 12px; color: var(--text-2); }
+.open-line i { width: 8px; height: 8px; border-radius: 50%; background: #35c48b; box-shadow: 0 0 9px #35c48b; flex: none; }
+.open-line b { color: var(--text); font-weight: 600; }
+.open-line .rest { color: var(--text-3); }
 .step .w { font-size: 12px; color: #fde7b0; }
 .crawl-hint { display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px; color: var(--text-2); line-height: 1.45; }
 .crawl-hint svg { width: 18px; height: 18px; flex: none; color: var(--brew-hi); margin-top: 1px; }
@@ -529,6 +550,9 @@ body.sb-open #sidebar { transform: none; opacity: 1; }
 .sdx-temp.no-data { filter: grayscale(1); }
 
 /* Tacos & Brews: heatmap view crossfades with the pins */
+/* Another layer is focused: nothing from Tacos & Brews stays on the map */
+.hs-off .sdx-pin, .hs-off .sdx-cluster, .hs-off .sdx-me, .hs-off path.crawl-line, .hs-off path.near-ring,
+.hs-off .leaflet-heatmap-layer, .hs-off .crawl-tip { opacity: 0 !important; visibility: hidden; pointer-events: none; transition: opacity .35s var(--ease-out), visibility 0s .35s; }
 .hs-heat .sdx-pin, .hs-heat .sdx-cluster { opacity: 0 !important; transform: scale(.5); pointer-events: none; }
 .sdx-cluster { transition: transform .3s var(--ease-out), opacity .4s var(--ease-out); }
 .leaflet-heatmap-layer { opacity: 0; transition: opacity .6s var(--ease-out); pointer-events: none; }
@@ -580,7 +604,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
   #topbar { flex-wrap: wrap; gap: 8px 10px; }
   .chips { order: 3; width: 100%; }
   #sidebar { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: min(68vh, 620px); z-index: 1060; transform: translateY(calc(100% + 24px)); }
-  #dock { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 46vh; }
+  #dock { left: 8px; right: 8px; bottom: 8px; width: auto; }
   #legend-stack { top: 124px; left: 8px; }
   .leaflet-top { top: 120px; }
   #toast { top: 128px; }
@@ -593,6 +617,163 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
 }
 
 /* Reduced motion: instant state changes, no ambient drift/pulses */
+/* =====================================================================
+   LIVE SKY & SEA (satellite, stations, wind, alerts, sea + air)
+   ===================================================================== */
+.leaflet-sat-pane { mix-blend-mode: screen; filter: saturate(.85) contrast(1.12); transition: opacity .7s var(--ease-out); opacity: .8; pointer-events: none; }
+.leaflet-sat-pane.is-off { opacity: 0; }
+.leaflet-radar-pane { opacity: .88; transition: opacity .7s var(--ease-out); pointer-events: none; }
+.leaflet-radar-pane.is-off { opacity: 0; }
+.leaflet-radar-pane .leaflet-layer { transition: opacity .6s linear; }
+.lg-row .sw.radar { background: linear-gradient(90deg, #35d36a, #f2e22c, #f08a1c, #e5303a); }
+.radar-sum { margin-top: 8px; font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--hair); padding-top: 8px; }
+.radar-sum i { width: 8px; height: 8px; border-radius: 50%; background: #6f7f96; flex: none; }
+.radar-sum.k-isolated i, .radar-sum.k-scattered i { background: #f2e22c; box-shadow: 0 0 8px #f2e22c; }
+.radar-sum.k-widespread i { background: #e5484d; box-shadow: 0 0 8px #e5484d; }
+.radar-sum.k-none i { background: #35c48b; }
+.leaflet-sat-pane .leaflet-layer { transition: opacity .8s linear; }
+
+.layer-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.tgl-group { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.tgl {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px;
+  border: 1px solid var(--hair-strong); background: rgba(255,255,255,.03); color: var(--text-2);
+  font: 600 11.5px Inter, sans-serif; cursor: pointer;
+  transition: background .35s var(--ease-out), border-color .35s var(--ease-out), color .35s var(--ease-out), transform .35s var(--ease-spring);
+}
+.tgl svg { width: 13px; height: 13px; }
+.tgl:hover { color: var(--text); transform: translateY(-1px); }
+.tgl:active { transform: scale(.96); }
+.tgl[aria-pressed="true"] { color: #eaf6ff; background: rgba(56,189,248,.18); border-color: rgba(56,189,248,.55); }
+.tgl[disabled] { opacity: .5; cursor: progress; }
+.layer-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 11.5px; color: var(--text-3); }
+.layer-line[hidden] { display: none; }
+.layer-line .mono { color: var(--text-2); }
+.layer-line.bad .mono { color: #ff9a8a; }
+
+/* observed stations */
+.sdx-obs {
+  position: relative; display: flex; align-items: center; gap: 5px; padding: 3px 8px 3px 6px; border-radius: 999px;
+  background: rgba(10,15,27,.9); border: 1.5px solid var(--c); color: var(--text);
+  box-shadow: 0 0 0 3px rgba(10,15,27,.55), 0 6px 18px -6px var(--c); font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  animation: sdx-pop .55s var(--ease-spring) both;
+}
+.sdx-obs::before { content: ""; width: 7px; height: 7px; border-radius: 2px; transform: rotate(45deg); background: var(--c); flex: none; }
+.sdx-obs .o-id { font-size: 9.5px; color: var(--text-3); letter-spacing: .04em; }
+.sdx-obs .o-d { font-size: 10.5px; padding: 1px 5px; border-radius: 999px; background: rgba(255,255,255,.08); }
+.sdx-obs .o-d.up { color: #ffb185; background: rgba(217,89,38,.22); }
+.sdx-obs .o-d.dn { color: #8fc2ff; background: rgba(57,135,229,.24); }
+.sdx-obs.stale { opacity: .55; }
+.sdx-temps-off .sdx-obs, .sdx-temps-off .sdx-wind { opacity: 0; pointer-events: none; transition: opacity .4s; }
+.mc-far .sdx-obs .o-id { display: none; }
+@keyframes sdx-pop { from { opacity: 0; transform: scale(.5); } }
+
+/* wind flow */
+.sdx-wind {
+  position: absolute; left: 0; top: 0; width: 34px; height: 34px; margin: -56px 0 0 -17px; pointer-events: none;
+  color: var(--c, #9ad7ff); opacity: var(--op, 0);
+  transform: rotate(calc(var(--rot, 0) * 1deg)) scale(var(--sc, 1));
+  transition: transform .9s var(--ease-out), opacity .6s var(--ease-out), color .6s;
+  filter: drop-shadow(0 0 5px currentColor);
+}
+.sdx-wind svg { width: 100%; height: 100%; overflow: visible; }
+.sdx-wind path { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; transform-box: fill-box; transform-origin: center;
+  animation: sdx-flow calc(2.8s / var(--spd, 1)) linear infinite; animation-delay: calc(var(--k) * -0.933s / var(--spd, 1)); }
+.mc-far .sdx-wind.tier-2 { opacity: 0 !important; }
+@keyframes sdx-flow { 0% { transform: translateY(11px); opacity: 0; } 22% { opacity: 1; } 78% { opacity: 1; } 100% { transform: translateY(-11px); opacity: 0; } }
+
+/* alerts banner */
+#alerts {
+  position: fixed; z-index: 1040; top: 80px; left: 50%; width: min(520px, calc(100vw - 24px));
+  transform: translate(-50%, -14px); opacity: 0; pointer-events: none;
+  transition: transform .55s var(--ease-spring), opacity .4s var(--ease-out), left .5s var(--ease-out);
+  border-radius: 14px; overflow: hidden;
+}
+#alerts.is-on { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+@media (min-width: 900px) { body.sb-open #alerts { left: calc(50% - (var(--sb-w) + 16px) / 2); } }
+@media (max-width: 700px) { #alerts { top: 124px; width: calc(100vw - 76px); left: calc(50% - 32px); } }
+#alerts .al-top { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; text-align: left; color: var(--text); background: none; border: 0; cursor: pointer; font: 500 12.5px/1.35 Inter, sans-serif; }
+#alerts .al-ico { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: color-mix(in srgb, var(--c) 24%, transparent); color: var(--c); flex: none; }
+#alerts .al-ico svg { width: 15px; height: 15px; }
+#alerts .al-text { flex: 1; min-width: 0; }
+#alerts .al-text b { font-weight: 600; }
+#alerts .al-text span { display: block; color: var(--text-3); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#alerts .al-more { font-size: 11px; color: var(--text-2); padding: 2px 7px; border-radius: 999px; background: rgba(255,255,255,.07); }
+#alerts .al-chev { width: 15px; height: 15px; color: var(--text-3); transition: transform .4s var(--ease-out); flex: none; }
+#alerts.is-open .al-chev { transform: rotate(180deg); }
+#alerts .al-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .45s var(--ease-out); }
+#alerts.is-open .al-body { grid-template-rows: 1fr; }
+#alerts .al-body > ul { overflow: hidden; margin: 0; padding: 0 12px; list-style: none; }
+#alerts.is-open .al-body > ul { padding-bottom: 10px; }
+#alerts .al-item { display: flex; gap: 9px; padding: 8px 0; border-top: 1px solid var(--hair); font-size: 12px; line-height: 1.4; color: var(--text-2); }
+#alerts .al-item i { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; background: var(--c); box-shadow: 0 0 8px var(--c); flex: none; }
+#alerts .al-item b { color: var(--text); font-weight: 600; }
+
+/* sidebar: sea + air and forecast check */
+.sea-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sea-tile { padding: 10px; border-radius: 12px; background: rgba(255,255,255,.03); border: 1px solid var(--hair); position: relative; overflow: hidden; min-width: 0; }
+.sea-tile .tn { font-size: 10.5px; color: var(--text-3); display: flex; align-items: center; gap: 5px; }
+.sea-tile .tn i { width: 7px; height: 7px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
+.sea-tile .tv { font-size: 20px; font-weight: 600; margin-top: 3px; letter-spacing: -.02em; }
+.sea-tile .tv small { font-size: 11px; color: var(--text-3); font-weight: 500; margin-left: 2px; }
+.sea-tile .th { font-size: 10.5px; color: var(--text-3); margin-top: 1px; min-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sea-tile .mini { display: block; width: 100%; height: 26px; margin-top: 6px; overflow: visible; }
+.sea-tile .mini path { fill: none; stroke: var(--c); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 0; animation: sdx-draw 1.1s var(--ease-out) both; }
+.sea-tile.is-bad .tv { color: var(--text-3); }
+.sea-tile.is-stale { opacity: .6; }
+@keyframes sdx-draw { from { stroke-dashoffset: 1; } }
+.obs-row { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--hair); font-size: 12px; color: var(--text-2); }
+.obs-row:first-of-type { border-top: 0; }
+.obs-row b { color: var(--text); font-weight: 600; }
+.obs-row .d { min-width: 34px; text-align: center; padding: 1px 6px; border-radius: 999px; background: rgba(255,255,255,.07); font-size: 11px; }
+.obs-row .d.up { color: #ffb185; background: rgba(217,89,38,.22); }
+.obs-row .d.dn { color: #8fc2ff; background: rgba(57,135,229,.24); }
+.al-card .al-row { padding: 8px 0; border-top: 1px solid var(--hair); font-size: 12px; line-height: 1.45; color: var(--text-2); }
+.al-card .al-row:first-of-type { border-top: 0; }
+.al-card .al-row b { color: var(--text); }
+.clear-line { margin-top: 8px; font-size: 12px; color: var(--text-2); }
+.clear-line b { color: var(--text); font-weight: 600; }
+.lg-row .sw.sat { background: linear-gradient(135deg, #e8f1ff, #7aa6d8); }
+.lg-row .sw.obs { border-radius: 2px; transform: rotate(45deg) scale(.8); background: var(--brew-hi); }
+.lg-row .sw.wind { background: none; box-shadow: none; position: relative; }
+.lg-row .sw.wind::after { content: "↑"; position: absolute; inset: -4px 0 0 1px; color: #9ad7ff; font-size: 14px; font-weight: 700; line-height: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .sdx-wind path { animation: none !important; opacity: .85; transform: translateY(calc((var(--k) - 1) * 7px)); }
+  .sea-tile .mini path { animation: none !important; }
+}
+
+/* =====================================================================
+   MOTION POLISH
+   ===================================================================== */
+:root { --ease-spring-soft: cubic-bezier(.3, 1.22, .5, 1); }
+body.sb-open #sidebar { transition: transform .75s var(--ease-spring-soft), opacity .45s var(--ease-out); }
+.chip:active { transform: scale(.96); }
+.chip { transition-property: color, transform; }
+.leaflet-tile-pane { filter: brightness(var(--tile-b, 1)); transition: filter .8s linear; }
+@keyframes sdx-breathe { 0%, 100% { opacity: .32; } 50% { opacity: .6; } }
+.mc-loading:not(.sdx-temps-off) .sdx-temp { animation: sdx-breathe 1.5s ease-in-out infinite; }
+.sea-tile.is-loading::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 20%, rgba(255,255,255,.09) 50%, transparent 80%); transform: translateX(-100%); animation: sdx-shimmer 1.4s ease-in-out infinite; }
+.sea-tile.is-loading .th { color: transparent; background: rgba(255,255,255,.06); border-radius: 4px; }
+@keyframes sdx-shimmer { to { transform: translateX(100%); } }
+#dock { view-transition-name: sdx-dock; }
+::view-transition-group(root) { animation: none; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-group(sdx-dock) { animation-duration: .5s; animation-timing-function: var(--ease-out); }
+.grab { display: none; }
+@media (max-width: 700px) {
+  #dock { height: min(84vh, 680px); max-height: none; overflow: hidden; display: flex; flex-direction: column;
+    transform: translate3d(0, var(--sheet-y, 0px), 0); transition: transform .55s var(--ease-spring-soft); }
+  #dock-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; overscroll-behavior: contain; }
+  .grab { display: grid; place-items: center; width: 100%; height: 22px; margin: -8px 0 4px; flex: none; cursor: grab; touch-action: none; background: none; border: 0; }
+  .grab i { width: 38px; height: 4px; border-radius: 4px; background: rgba(148,163,184,.4); transition: background .3s, width .3s var(--ease-spring); }
+  .grab:active i, .grab:focus-visible i { background: rgba(148,163,184,.8); width: 52px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .leaflet-tile-pane { transition: none; }
+  .mc-loading:not(.sdx-temps-off) .sdx-temp, .sea-tile.is-loading::after { animation: none !important; }
+  #dock { transition: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; transition-delay: 0ms !important; }
   .leaflet-fog-pane, .leaflet-fogtex-pane { animation: none !important; }
@@ -633,6 +814,9 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       </div>
       <p class="sub" style="margin-top:10px">CARTO Dark Matter tiles need a free key (non-commercial: up to 5M tiles/month). It's stored only in this browser.</p>
     </div>
+    <button id="share-btn" class="btn-icon" type="button" aria-label="Copy a link to this view" title="Copy link to this view">
+      <i data-lucide="link"></i>
+    </button>
     <button id="sb-toggle" class="btn-icon" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Toggle analytics panel" title="Analytics">
       <i data-lucide="panel-right-open"></i>
     </button>
@@ -640,6 +824,8 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
 </header>
 
 <div id="legend-stack" aria-label="Legend"></div>
+
+<div id="alerts" class="sdx-glass" role="region" aria-label="Weather alerts" aria-live="polite" aria-hidden="true"></div>
 
 <aside id="sidebar" class="sdx-glass" aria-label="Analytics">
   <div class="sb-head">
@@ -650,6 +836,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
 </aside>
 
 <section id="dock" class="sdx-glass" aria-label="Layer controls">
+  <button id="dock-grab" class="grab" type="button" aria-label="Resize the controls panel (drag, or press Enter to cycle)"><i></i></button>
   <div id="dock-tabs" class="dock-tabs" role="tablist" aria-label="Active layers" hidden></div>
   <div id="dock-body"></div>
 </section>
@@ -1371,6 +1558,97 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
     return tagged.filter((p) => tagged.some((q) => q.type !== p.type && haversineMi(p, q) <= radius));
   }
 
+  // ------------------------------------------------------------------ shareable URL state
+  // The view you're looking at lives in the URL hash (#t=hotspots&f=openNow&r=2). decode() never
+  // throws and only returns values that are valid for the controls (clamped, snapped, whitelisted).
+  const URL_DEFAULT_TAB = 'microclimates';
+  const URL_FILTERS = ['crawlable', 'hazyIPA', 'open247', 'bajaFish', 'openNow'];
+  const URL_LAYERS = ['sat', 'obs', 'wind', 'radar'];
+  const URL_ID = /^[A-Za-z0-9_-]{1,40}$/;
+  const URL_TAB = /^[a-z0-9][a-z0-9-]{0,30}$/;
+  const snapTo = (v, lo, hi, step) => Math.min(hi, Math.max(lo, Math.round(v / step) * step));
+  const trimNum = (n) => String(+n.toFixed(2));
+
+  function urlDecode(input) {
+    const out = {};
+    if (typeof input !== 'string' || input.length > 2000) return out;
+    for (const pair of input.replace(/^#/, '').split('&')) {
+      const eq = pair.indexOf('=');
+      if (eq < 1) continue;
+      let v;
+      try { v = decodeURIComponent(pair.slice(eq + 1)); } catch { continue; }
+      const k = pair.slice(0, eq);
+      const list = (allowed) => allowed.filter((x) => v.split(',').includes(x));
+      if (k === 't' && URL_TAB.test(v)) out.tab = v;
+      else if (k === 'h' && v !== '' && Number.isFinite(+v)) out.hour = snapTo(+v, 6, 22, 0.25);
+      else if (k === 'src' && (v === 'sim' || v === 'live')) out.source = v;
+      else if (k === 'm' && (v === 'temp' || v === 'rh')) out.metric = v;
+      else if (k === 'l') { const l = list(URL_LAYERS); if (l.length) out.layers = l; }
+      else if (k === 'a' && URL_ID.test(v)) out.hood = v;
+      else if (k === 'f') { const f = list(URL_FILTERS); if (f.length) out.filters = f; }
+      else if (k === 'r' && v !== '' && Number.isFinite(+v)) out.radiusMi = snapTo(+v, 0.5, 3, 0.25);
+      else if (k === 'v' && (v === 'pins' || v === 'heat')) out.view = v;
+      else if (k === 's' && URL_ID.test(v)) out.sel = v;
+    }
+    return out;
+  }
+
+  function urlEncode(st = {}) {
+    const parts = [];
+    if (typeof st.tab === 'string' && st.tab !== URL_DEFAULT_TAB && URL_TAB.test(st.tab)) parts.push(`t=${st.tab}`);
+    if (Number.isFinite(st.hour)) parts.push(`h=${trimNum(snapTo(st.hour, 6, 22, 0.25))}`);
+    if (st.source === 'live') parts.push('src=live');
+    if (st.metric === 'rh') parts.push('m=rh');
+    const layers = URL_LAYERS.filter((x) => (st.layers || []).includes(x));
+    if (layers.length) parts.push(`l=${layers.join(',')}`);
+    if (typeof st.hood === 'string' && st.hood !== 'all' && URL_ID.test(st.hood)) parts.push(`a=${st.hood}`);
+    const filters = URL_FILTERS.filter((x) => (st.filters || []).includes(x));
+    if (filters.length) parts.push(`f=${filters.join(',')}`);
+    if (Number.isFinite(st.radiusMi) && snapTo(st.radiusMi, 0.5, 3, 0.25) !== CRAWL_RADIUS_MI) parts.push(`r=${trimNum(snapTo(st.radiusMi, 0.5, 3, 0.25))}`);
+    if (st.view === 'heat') parts.push('v=heat');
+    if (typeof st.sel === 'string' && URL_ID.test(st.sel)) parts.push(`s=${st.sel}`);
+    return parts.join('&');
+  }
+
+  // ------------------------------------------------------------------ smarter crawls
+  const SOON_MIN = 45;
+  const SNUG_MIN = 30;
+  const minsBetween = (a, b) => Math.round((b.getTime() - a.getTime()) / 60000);
+
+  // Is a spot open right now, and is that about to change? { state, minutes, soon }
+  function openStatus(hours, now) {
+    const open = isOpenAt(hours, now);
+    if (open === null) return { state: 'unknown', minutes: null, soon: false };
+    const ch = nextChange(hours, now);
+    const minutes = ch && ch.at ? minsBetween(now, ch.at) : null;
+    return { state: open ? 'open' : 'closed', minutes, soon: minutes != null && minutes <= SOON_MIN };
+  }
+
+  // For each stop from nearestTacos: when you'd get there if you set off at startAt, whether it's
+  // open by then, and how long it stays open after you arrive. Never guesses: unknown hours -> open null.
+  function crawlArrival(stops, startAt) {
+    return stops.map((s) => {
+      const arrivesAt = new Date(startAt.getTime() + s.minutes * 60e3);
+      const open = isOpenAt(s.poi.hours, arrivesAt);
+      const ch = open === null ? null : nextChange(s.poi.hours, arrivesAt);
+      const closesInMin = open && ch && ch.at ? minsBetween(arrivesAt, ch.at) : null;
+      return {
+        ...s, arrivesAt, open, closesInMin,
+        opensAt: open === false && ch && ch.at ? ch.at : null,
+        tight: closesInMin != null && closesInMin <= SNUG_MIN,
+      };
+    });
+  }
+
+  function countOpen(pois, now) {
+    const c = { open: 0, closed: 0, unknown: 0, total: pois.length };
+    for (const p of pois) {
+      const o = isOpenAt(p.hours, now);
+      c[o === null ? 'unknown' : o ? 'open' : 'closed']++;
+    }
+    return c;
+  }
+
   // ------------------------------------------------------------------ NWS (api.weather.gov)
   const HOUR_MS = 3600e3;
   const NWS_SERIES = ['temperature', 'relativeHumidity', 'skyCover'];
@@ -1412,6 +1690,267 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
     return json;
   }
 
+  const round1 = (x) => Math.round(x * 10) / 10;
+  const kmhToMph = (k) => (k == null || !Number.isFinite(k) ? null : round1(k * 0.621371));
+
+  // Shortest-way-round interpolation for compass bearings (degrees).
+  function lerpAngle(a, b, t) {
+    const d = ((b - a + 540) % 360) - 180;
+    return (((a + d * t) % 360) + 360) % 360;
+  }
+
+  // When does the coastal cloud deck break up, and when does it come back?
+  // sky24: 24 hourly sky-cover % (index = hour, null = no data). Linear interpolation of the 50% crossing.
+  function clearingHour(sky24) {
+    const idx = [];
+    if (Array.isArray(sky24)) for (let h = 6; h < 24; h++) if (Number.isFinite(sky24[h])) idx.push(h);
+    if (idx.length < 6) return { state: 'unknown', at: null, returnAt: null };
+    const cross = (h0, h1) => h0 + (50 - sky24[h0]) / (sky24[h1] - sky24[h0]) * (h1 - h0);
+    let at = null;
+    let state = 'cloudy';
+    let k = 0;
+    if (sky24[idx[0]] < 50) state = 'clear';
+    else {
+      for (k = 1; k < idx.length; k++) {
+        if (sky24[idx[k]] < 50) { at = cross(idx[k - 1], idx[k]); state = 'clearing'; break; }
+      }
+    }
+    let returnAt = null;
+    if (state !== 'cloudy') {
+      for (let j = Math.max(k, 1); j < idx.length; j++) {
+        if (sky24[idx[j - 1]] < 50 && sky24[idx[j]] >= 50) { returnAt = cross(idx[j - 1], idx[j]); break; }
+      }
+    }
+    return { state, at, returnAt };
+  }
+
+  // ------------------------------------------------------------------ NWS station observations
+  // Real airport stations (api.weather.gov/stations/{id}/observations/latest).
+  const OBS_STATIONS = [
+    { id: 'KSAN', name: 'San Diego Intl', lat: 32.73361, lon: -117.18306 },
+    { id: 'KMYF', name: 'Montgomery Field', lat: 32.81444, lon: -117.13639 },
+    { id: 'KNKX', name: 'Miramar', lat: 32.86833, lon: -117.1425 },
+    { id: 'KSEE', name: 'Gillespie Field', lat: 32.82738, lon: -116.97369 },
+    { id: 'KCRQ', name: 'Palomar (Carlsbad)', lat: 33.13, lon: -117.27583 },
+    { id: 'KOKB', name: 'Oceanside', lat: 33.21806, lon: -117.35139 },
+    { id: 'KNFG', name: 'Camp Pendleton', lat: 33.30472, lon: -117.35389 },
+    { id: 'KRNM', name: 'Ramona', lat: 33.0375, lon: -116.91583 },
+    { id: 'KSDM', name: 'Brown Field', lat: 32.57528, lon: -116.99306 },
+    { id: 'KNRS', name: 'Ream Field', lat: 32.56302, lon: -117.11091 },
+  ];
+
+  function parseObs(json, nowMs) {
+    const p = json && json.properties;
+    if (!p || typeof p !== 'object') throw new Error('NWS observation has no properties');
+    const num = (q) => (q && Number.isFinite(q.value) ? q.value : null);
+    const t = num(p.temperature);
+    if (t == null) throw new Error('NWS observation has no temperature');
+    const at = Date.parse(p.timestamp);
+    return {
+      tF: cToF(t),
+      rh: num(p.relativeHumidity),
+      windMph: kmhToMph(num(p.windSpeed)),
+      windFromDeg: num(p.windDirection),
+      desc: typeof p.textDescription === 'string' ? p.textDescription : '',
+      at: Number.isFinite(at) ? at : null,
+      ageMin: Number.isFinite(at) && Number.isFinite(nowMs) ? Math.max(0, Math.round((nowMs - at) / 60000)) : null,
+    };
+  }
+
+  const obsDelta = (forecastF, observedF) => (Number.isFinite(forecastF) && Number.isFinite(observedF) ? Math.round(observedF - forecastF) : null);
+
+  function nearestStation(lat, lon, maxMi) {
+    let best = null;
+    for (const s of OBS_STATIONS) {
+      const d = haversineMi({ lat, lon }, s);
+      if (d <= maxMi && (!best || d < best.d)) best = { s, d };
+    }
+    return best ? best.s : null;
+  }
+
+  // ------------------------------------------------------------------ NWS alerts
+  const ALERT_RE = /heat|fog|beach hazard|surf|rip current|red flag|fire weather|wind|flood|air quality|tsunami|tornado|thunderstorm|smoke|dust|tropical|hurricane|storm|blizzard|freeze|frost|winter/i;
+  const SEVERITY = { Extreme: 4, Severe: 3, Moderate: 2, Minor: 1 };
+
+  function relevantAlerts(json, nowMs) {
+    if (!json || !Array.isArray(json.features)) throw new Error('NWS alerts response has no features list');
+    const out = [];
+    for (const f of json.features) {
+      const p = f && f.properties;
+      if (!p || !ALERT_RE.test(String(p.event || ''))) continue;
+      const end = Date.parse(p.ends || p.expires);
+      if (Number.isFinite(end) && end <= nowMs) continue;
+      out.push({
+        id: p.id, event: p.event, severity: p.severity, level: SEVERITY[p.severity] || 0,
+        headline: p.headline || p.event, areaDesc: p.areaDesc || '',
+        onset: p.onset || null, ends: p.ends || p.expires || null,
+      });
+    }
+    return out.sort((a, b) => b.level - a.level || String(a.ends).localeCompare(String(b.ends)));
+  }
+
+  function mergeAlerts(lists) {
+    const seen = new Map();
+    for (const list of lists) for (const a of list) if (!seen.has(a.id)) seen.set(a.id, a);
+    return [...seen.values()].sort((a, b) => b.level - a.level);
+  }
+
+  // The same warning is issued once per forecast zone; show it once with every area it covers.
+  function groupAlerts(list) {
+    const out = [];
+    const byKey = new Map();
+    for (const a of list) {
+      const key = `${a.event}|${a.ends}`;
+      const hit = byKey.get(key);
+      if (!hit) {
+        const g = { ...a, ids: [a.id] };
+        byKey.set(key, g);
+        out.push(g);
+      } else {
+        hit.ids.push(a.id);
+        for (const area of String(a.areaDesc || '').split('; ')) if (area && !hit.areaDesc.split('; ').includes(area)) hit.areaDesc += `; ${area}`;
+      }
+    }
+    return out;
+  }
+
+  // ------------------------------------------------------------------ ocean + air
+  function parseCoops(json) {
+    const rows = json && Array.isArray(json.data) ? json.data : [];
+    const series = [];
+    let at = null;
+    for (const r of rows) {
+      const v = parseFloat(r && r.v);
+      const t = Date.parse(String(r && r.t).replace(' ', 'T') + ':00Z');
+      if (Number.isFinite(v) && Number.isFinite(t)) { series.push(v); at = t; }
+    }
+    if (!series.length) throw new Error('NOAA returned no water temperature readings');
+    return { tF: series[series.length - 1], at, series };
+  }
+
+  function parseMarine(json) {
+    const c = json && json.current;
+    if (!c || !Number.isFinite(c.wave_height)) throw new Error('Open-Meteo returned no marine reading');
+    const h = (json.hourly && Array.isArray(json.hourly.wave_height)) ? json.hourly.wave_height : [];
+    return {
+      waveFt: round1(c.wave_height),
+      periodS: Number.isFinite(c.wave_period) ? round1(c.wave_period) : null,
+      sstF: Number.isFinite(c.sea_surface_temperature) ? round1(c.sea_surface_temperature) : null,
+      waveSeries: h.filter(Number.isFinite),
+    };
+  }
+
+  function parseAir(json) {
+    const c = json && json.current;
+    if (!c || !Number.isFinite(c.us_aqi)) throw new Error('Open-Meteo returned no air quality reading');
+    const h = (json.hourly && Array.isArray(json.hourly.us_aqi)) ? json.hourly.us_aqi : [];
+    return { aqi: Math.round(c.us_aqi), pm25: Number.isFinite(c.pm2_5) ? c.pm2_5 : null, series: h.filter(Number.isFinite) };
+  }
+
+  const AQI_BANDS = [
+    [50, 'Good'], [100, 'Moderate'], [150, 'Unhealthy for sensitive groups'],
+    [200, 'Unhealthy'], [300, 'Very unhealthy'], [Infinity, 'Hazardous'],
+  ];
+  function aqiCategory(aqi) {
+    if (!Number.isFinite(aqi)) return null;
+    const i = AQI_BANDS.findIndex(([max]) => aqi <= max);
+    return { level: i, label: AQI_BANDS[i][1] };
+  }
+
+  // ------------------------------------------------------------------ rain radar (NEXRAD composite via Iowa State tile cache)
+  // Free, keyless, CORS-open. Frames are the live composite plus the five 10-minute-old ones.
+  const RADAR_BASE = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0';
+  const COUNTY_BOX = { latMin: 32.53, latMax: 33.52, lonMin: -117.62, lonMax: -116.08 };
+
+  const radarFrames = () => [50, 40, 30, 20, 10, 0].map((m) => ({ minAgo: m, id: m ? `nexrad-n0q-900913-m${m}m` : 'nexrad-n0q-900913' }));
+  const radarTileUrl = (id, z, x, y) => `${RADAR_BASE}/${id}/${z}/${x}/${y}.png`;
+
+  const mercY = (lat, z) => (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * 2 ** z;
+  const lonX = (lon, z) => (lon + 180) / 360 * 2 ** z;
+
+  function radarCountyTiles(z) {
+    const x0 = Math.floor(lonX(COUNTY_BOX.lonMin, z));
+    const x1 = Math.floor(lonX(COUNTY_BOX.lonMax, z));
+    const y0 = Math.floor(mercY(COUNTY_BOX.latMax, z));
+    const y1 = Math.floor(mercY(COUNTY_BOX.latMin, z));
+    const out = [];
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) out.push({ x, y });
+    return out;
+  }
+
+  // The part of a 256px tile that lies inside San Diego County's bounding box (null if none).
+  function radarPixelBox(tile, z) {
+    const px = (v, t) => (v - t) * 256;
+    const x0 = Math.max(0, Math.floor(px(lonX(COUNTY_BOX.lonMin, z), tile.x)));
+    const x1 = Math.min(256, Math.ceil(px(lonX(COUNTY_BOX.lonMax, z), tile.x)));
+    const y0 = Math.max(0, Math.floor(px(mercY(COUNTY_BOX.latMax, z), tile.y)));
+    const y1 = Math.min(256, Math.ceil(px(mercY(COUNTY_BOX.latMin, z), tile.y)));
+    return x1 > x0 && y1 > y0 ? { x0, y0, x1, y1 } : null;
+  }
+
+  // Radar tiles are transparent where there is no echo. Alpha <= 8 is resampling noise, not rain.
+  function radarEchoCount(rgba, w, h, box) {
+    let echo = 0;
+    let total = 0;
+    for (let y = Math.max(0, box.y0); y < Math.min(h, box.y1); y++) {
+      for (let x = Math.max(0, box.x0); x < Math.min(w, box.x1); x++) {
+        total++;
+        if (rgba[(y * w + x) * 4 + 3] > 8) echo++;
+      }
+    }
+    return { echo, total };
+  }
+
+  const RADAR_CLASSES = [[0.005, 'none', 'No rain on radar'], [0.05, 'isolated', 'Isolated showers'], [0.25, 'scattered', 'Scattered rain'], [Infinity, 'widespread', 'Widespread rain']];
+  function radarClassify(echo, total) {
+    if (!Number.isFinite(echo) || !Number.isFinite(total) || total <= 0) return null;
+    const share = echo / total;
+    const [, key, label] = RADAR_CLASSES.find(([max]) => share < max);
+    return { key, label, share };
+  }
+
+  function radarTrend(now, then) {
+    if (!Number.isFinite(now) || !Number.isFinite(then)) return null;
+    if (now < 0.005 && then < 0.005) return 'none';
+    const d = now - then;
+    return d > 0.03 ? 'increasing' : d < -0.03 ? 'decreasing' : 'steady';
+  }
+
+  // ------------------------------------------------------------------ satellite (NASA GIBS, GOES-West GeoColor)
+  const SAT_LAYER = 'GOES-West_ABI_GeoColor';
+  const SAT_BASE = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best';
+
+  function satDefaultTime(xml) {
+    const m = /<Default>(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)<\/Default>/.exec(String(xml || ''));
+    if (!m) throw new Error('Satellite capabilities had no default time');
+    return m[1];
+  }
+
+  const isoZ = (ms) => new Date(ms).toISOString().replace('.000Z', 'Z');
+
+  function satFrames(latestIso, count, stepMin) {
+    const t = Date.parse(latestIso);
+    if (!Number.isFinite(t)) throw new Error('Satellite latest time is not a date');
+    if (!Number.isInteger(stepMin) || stepMin < 10 || stepMin % 10) throw new Error('Satellite frame step must be a multiple of 10 minutes');
+    return Array.from({ length: count }, (_, i) => isoZ(t - (count - 1 - i) * stepMin * 60e3));
+  }
+
+  // GIBS advertises a newest frame slightly before its tiles exist; these are the times to try, newest first.
+  const satCandidates = (latestIso, count) => satFrames(latestIso, count, 10).reverse();
+
+  const satAgeMin = (iso, nowMs) => Math.round((nowMs - Date.parse(iso)) / 60000);
+
+  function satTileXY(lat, lon, z) {
+    const n = 2 ** z;
+    const r = lat * Math.PI / 180;
+    return {
+      x: Math.floor((lon + 180) / 360 * n),
+      y: Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n),
+    };
+  }
+
+  const satTileUrl = (iso, z, x, y) => `${SAT_BASE}/${SAT_LAYER}/default/${iso}/GoogleMapsCompatible_Level7/${z}/${y}/${x}.png`;
+
   // Only tags that are TRUE for a spot get shown; absent tags are never rendered.
   const TAG_LABELS = { hazyIPA: 'Hazy IPA', open247: '24/7', bajaFish: 'Seafood' };
   const activeLabels = (p) => Object.keys(TAG_LABELS).filter((k) => p.tags[k]).map((k) => TAG_LABELS[k]);
@@ -1435,7 +1974,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
     }
   }
 
-  const OPTIONAL_HOOKS = ['createState', 'onDeactivate', 'onStateChange', 'onFrame', 'onFocus', 'onBlur', 'renderControls', 'renderSidebar', 'legend', 'bounds'];
+  const OPTIONAL_HOOKS = ['createState', 'onDeactivate', 'onStateChange', 'onFrame', 'onFocus', 'onBlur', 'renderControls', 'renderSidebar', 'legend', 'bounds', 'urlState'];
 
   class ModuleRegistry extends EventBus {
     constructor() { super(); this._modules = []; }
@@ -1464,15 +2003,22 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
   root.SDX = {
     DATA: { neighborhoods: NEIGHBORHOODS, landmarks: LANDMARKS, coastline: COASTLINE },
     ZONES,
-    math: { clamp, lerp, smoothstep, smootherstep, wrapHour },
+    math: { clamp, lerp, smoothstep, smootherstep, wrapHour, lerpAngle },
     climate: { tempAt, humidityAt, fogFactor, zoneCurve24 },
     geo: { haversineMi, walkMinutes, WALK_MPH, ROUTE_FACTOR },
-    crawl: { nearestTacos, RADIUS_MI: CRAWL_RADIUS_MI },
+    crawl: { nearestTacos, RADIUS_MI: CRAWL_RADIUS_MI, arrival: crawlArrival, status: openStatus, countOpen, SOON_MIN, SNUG_MIN },
     filters: { applyFilters },
     tags: { LABELS: TAG_LABELS, activeLabels },
     hours: { isOpenAt, nextChange },
     time: { TZ: SD_TZ, parts: sdParts, fromPacific, hour: sdHour, dayStartMs: sdDayStartMs, dayKey: sdDayKey },
-    nws: { expandSeries, dayHours, cToF, validateGridpoint, HOUR_MS },
+    nws: { expandSeries, dayHours, cToF, kmhToMph, clearingHour, validateGridpoint, HOUR_MS },
+    obs: { STATIONS: OBS_STATIONS, parse: parseObs, delta: obsDelta, nearest: nearestStation },
+    alerts: { relevant: relevantAlerts, merge: mergeAlerts, group: groupAlerts },
+    marine: { parseCoops, parseOpenMeteo: parseMarine },
+    air: { parse: parseAir, category: aqiCategory },
+    urlstate: { encode: urlEncode, decode: urlDecode },
+    radar: { frames: radarFrames, tileUrl: radarTileUrl, countyTiles: radarCountyTiles, pixelBox: radarPixelBox, echoCount: radarEchoCount, classify: radarClassify, trend: radarTrend },
+    sat: { LAYER: SAT_LAYER, BASE: SAT_BASE, candidates: satCandidates, parseDefaultTime: satDefaultTime, frames: satFrames, ageMin: satAgeMin, tileXY: satTileXY, tileUrl: satTileUrl },
     // Label for where a spot is: its real address city if known, else its area.
     placeLabel: (p) => addrCity(p.addr) || (NEIGHBORHOODS.find((n) => n.id === p.hood) || {}).name || '',
     EventBus,
@@ -1584,6 +2130,10 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       cb(next.dataset.v);
     });
   }
+
+  // The shared link, parsed once at load. It describes the focused tab only; each module reads its part.
+  const URLS = SDX.urlstate.decode(location.hash);
+  const urlFor = (id) => ((URLS.tab || 'microclimates') === id ? URLS : {});
 
   const UTIL = { esc, h, icon, paintIcons, fmtHour, hourTick, fmtMi, heatColor, tweenNumber, motion, segHTML, setSeg, bindSeg };
 
@@ -1777,8 +2327,13 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       LayerRegistry.list().forEach((def) => this.addModule(def));
       LayerRegistry.on('registered', (def) => this.addModule(def)); // late registrations get a chip too
       this.setSidebar(window.innerWidth >= 900);
-      const first = LayerRegistry.list()[0];
-      if (first) this.activate(first.id);
+      this.initSheet(); // before the first fly-to, so the map pads around where the sheet really sits
+      const first = (URLS.tab && LayerRegistry.get(URLS.tab)) || LayerRegistry.list()[0];
+      // A shared crawl flies to its own route, so skip the layer's default fly-to.
+      if (first) this.activate(first.id, { fly: !(first.id === 'hotspots' && urlFor('hotspots').sel) });
+      this.lastHash = location.hash.replace(/^#/, '');
+      window.addEventListener('hashchange', () => { if (location.hash.replace(/^#/, '') !== this.lastHash) location.reload(); });
+      document.getElementById('share-btn').addEventListener('click', () => this.share());
       this.booted = true;
       paintIcons();
       requestAnimationFrame(this.tick);
@@ -1789,8 +2344,72 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       const dt = this.lastT == null ? 16 : Math.min(64, t - this.lastT);
       this.lastT = t;
       for (const id of this.activeIds) this.hosts.get(id).call('onFrame', dt, t);
+      if (this.booted && t - (this.urlT || 0) > 800) { this.urlT = t; this.syncUrl(); }
       requestAnimationFrame(this.tick);
     };
+
+    // Phones: the controls dock is a bottom sheet with three stops (peek / half / full). Dragging moves it with
+    // transform only; releasing snaps (with a little fling) to the nearest stop.
+    initSheet() {
+      const dock = document.getElementById('dock');
+      const grab = document.getElementById('dock-grab');
+      const mq = window.matchMedia('(max-width: 700px)');
+      let snap = 1;
+      const stops = () => { const hgt = dock.offsetHeight; return [hgt - 132, hgt - Math.min(hgt, innerHeight * 0.46), 0]; };
+      const apply = (k, animate = true) => {
+        snap = k;
+        dock.style.transition = animate ? '' : 'none';
+        dock.style.setProperty('--sheet-y', `${stops()[k]}px`);
+      };
+      const sync = () => { if (mq.matches) apply(snap, false); else { dock.style.removeProperty('--sheet-y'); dock.style.transition = ''; } };
+      let drag = null;
+      grab.addEventListener('pointerdown', (e) => {
+        if (!mq.matches) return;
+        grab.setPointerCapture(e.pointerId);
+        drag = { y0: e.clientY, p0: stops()[snap], last: e.clientY, t: e.timeStamp, v: 0 };
+        dock.style.transition = 'none';
+      });
+      grab.addEventListener('pointermove', (e) => {
+        if (!drag) return;
+        const y = clamp(drag.p0 + (e.clientY - drag.y0), 0, stops()[0]);
+        dock.style.setProperty('--sheet-y', `${y}px`);
+        const dt = e.timeStamp - drag.t;
+        if (dt > 0) drag.v = (e.clientY - drag.last) / dt;
+        drag.last = e.clientY; drag.t = e.timeStamp;
+      });
+      const end = (e) => {
+        if (!drag) return;
+        const y = clamp(drag.p0 + (e.clientY - drag.y0) + drag.v * 160, 0, stops()[0]);
+        const s = stops();
+        apply(s.reduce((best, p, k) => (Math.abs(p - y) < Math.abs(s[best] - y) ? k : best), 0));
+        drag = null;
+      };
+      grab.addEventListener('pointerup', end);
+      grab.addEventListener('pointercancel', end);
+      grab.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); apply((snap + 1) % 3); } });
+      mq.addEventListener('change', sync);
+      window.addEventListener('resize', sync);
+      sync();
+    }
+
+    // Keep the address bar describing what's on screen, so any link you copy reopens this exact view.
+    currentUrlState() {
+      const host = this.hosts.get(this.focusedId);
+      return host ? { tab: this.focusedId, ...(host.call('urlState') || {}) } : {};
+    }
+
+    syncUrl() {
+      const hash = SDX.urlstate.encode(this.currentUrlState());
+      if (hash === this.lastHash) return;
+      this.lastHash = hash;
+      try { history.replaceState(null, '', location.pathname + location.search + (hash ? '#' + hash : '')); } catch { /* sandboxed frame */ }
+    }
+
+    async share() {
+      this.syncUrl();
+      try { await navigator.clipboard.writeText(location.href); this.toast('Link copied · it reopens this exact view'); }
+      catch { this.toast('Copy the address bar to share this view'); }
+    }
 
     addModule(def) {
       if (this.hosts.has(def.id)) return;
@@ -1879,7 +2498,8 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       if (motion() && this.booted) {
         this.dockBody.classList.add('is-out');
         this.sbBody.classList.add('is-out');
-        setTimeout(build, 170);
+        // The dock glass morphs to its new size where View Transitions exist; otherwise it just swaps.
+        setTimeout(() => (document.startViewTransition ? document.startViewTransition(build) : build()), 170);
       } else build();
     }
 
@@ -1948,7 +2568,9 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       const wide = window.innerWidth >= 900;
       // Keep data clear of the sidebar (right) and the dock (bottom-left), measured live.
       const sideW = wide && this.sidebarOpen ? this.sidebar.offsetWidth + 28 : 16;
-      const dockH = document.getElementById('dock').offsetHeight + 24;
+      // Only the part of the dock that's on screen counts (on phones it's a bottom sheet that can sit low).
+      const dock = document.getElementById('dock');
+      const dockH = Math.max(0, dock.offsetHeight - (parseFloat(dock.style.getPropertyValue('--sheet-y')) || 0)) + 24;
       const legendW = this.legend.offsetWidth ? this.legend.offsetWidth + 28 : 40;
       const fit = {
         paddingTopLeft: [(wide ? legendW : 16) + (opts.padLeft ?? 0), wide ? 96 : 150],
@@ -1966,6 +2588,190 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       this.toastTimer = setTimeout(() => this.toastEl.classList.remove('is-on'), 2800);
     }
   }
+
+  // ==================================================================
+  // LIVE SKY & SEA: data layer for satellite, station readings, alerts, sea + air.
+  // Each source is fetched with a timeout and polled with a back-off. A source that is
+  // down shows "unavailable"; nothing is ever filled in with simulated numbers.
+  // Test hook (console): window.SDXDebug = { fail: ['alerts', 'obs', 'sea', 'air', 'sat'] }.
+  // ==================================================================
+  const LiveSky = (() => {
+    const dbg = () => window.SDXDebug || {};
+    const nwsBase = () => dbg().nwsBase || 'https://api.weather.gov';
+    const failing = (name) => (dbg().fail || []).includes(name);
+    const subs = new Set();
+    const emit = (kind) => subs.forEach((fn) => { try { fn(kind); } catch (err) { console.error('[SDX] live-sky listener failed', err); } });
+
+    async function request(url, { name, accept, timeoutMs = 12000, text = false, blob = false } = {}) {
+      if (failing(name)) throw new Error(`${name} forced to fail (debug)`);
+      const ctl = new AbortController();
+      const to = setTimeout(() => ctl.abort(), timeoutMs);
+      try {
+        const r = await fetch(url, { signal: ctl.signal, headers: accept ? { Accept: accept } : undefined });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return await (blob ? r.blob() : text ? r.text() : r.json());
+      } catch (err) {
+        throw new Error(err.name === 'AbortError' ? `${name} timed out` : `${name}: ${err.message}`);
+      } finally { clearTimeout(to); }
+    }
+
+    // Runs `run` now and then every `every` ms (back off to `retry` after a failure). Skips while the tab is hidden.
+    function poller(run, { every, retry = 10 * 60e3 }) {
+      let timer = 0;
+      let on = false;
+      const loop = async () => {
+        clearTimeout(timer);
+        if (!on) return;
+        if (document.visibilityState !== 'visible') { timer = setTimeout(loop, 30e3); return; }
+        let failed = false;
+        try { await run(); } catch (err) { failed = true; console.error('[SDX]', err.message || err); }
+        if (on) timer = setTimeout(loop, failed ? retry : every);
+      };
+      return {
+        start() { if (!on) { on = true; loop(); } },
+        stop() { on = false; clearTimeout(timer); },
+        poke() { if (on) loop(); },
+        get running() { return on; },
+      };
+    }
+
+    const S = {
+      alerts: { items: [], at: 0, err: null },
+      sea: { water: null, marine: null, air: null, at: 0, err: {} },
+      obs: { byId: new Map(), at: 0, err: null },
+      sat: { latest: null, frames: [], at: 0, err: null },
+      radar: { at: 0, now: null, then: null, err: null },
+    };
+
+    const ALERT_POINTS = [[32.75, -117.2], [33.12, -117.08], [32.84, -116.6]]; // coast, valleys, mountains
+    async function runAlerts() {
+      const now = Date.now();
+      const res = await Promise.allSettled(ALERT_POINTS.map(([la, lo]) => request(`${nwsBase()}/alerts/active?point=${la},${lo}`, { name: 'alerts', accept: 'application/geo+json' })
+        .then((j) => SDX.alerts.relevant(j, now))));
+      const ok = res.filter((r) => r.status === 'fulfilled');
+      if (!ok.length) { S.alerts.err = res[0].reason.message; emit('alerts'); throw res[0].reason; }
+      S.alerts.items = SDX.alerts.group(SDX.alerts.merge(ok.map((r) => r.value)));
+      S.alerts.at = now;
+      S.alerts.err = ok.length < res.length ? 'Some alert zones could not be checked' : null;
+      emit('alerts');
+    }
+
+    const SEA_URLS = {
+      water: 'https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=9410230&product=water_temperature&range=24&units=english&time_zone=gmt&format=json',
+      marine: 'https://marine-api.open-meteo.com/v1/marine?latitude=32.75&longitude=-117.3&current=wave_height,wave_period,sea_surface_temperature&hourly=wave_height&past_hours=24&forecast_hours=0&length_unit=imperial&temperature_unit=fahrenheit&timezone=GMT',
+      air: 'https://air-quality-api.open-meteo.com/v1/air-quality?latitude=32.7&longitude=-117.1&current=us_aqi,pm2_5&hourly=us_aqi&past_hours=24&forecast_hours=0&timezone=GMT',
+    };
+    async function runSea() {
+      const jobs = {
+        water: request(SEA_URLS.water, { name: 'sea' }).then(SDX.marine.parseCoops),
+        marine: request(SEA_URLS.marine, { name: 'sea' }).then(SDX.marine.parseOpenMeteo),
+        air: request(SEA_URLS.air, { name: 'air' }).then(SDX.air.parse),
+      };
+      const keys = Object.keys(jobs);
+      const res = await Promise.allSettled(keys.map((k) => jobs[k]));
+      let good = 0;
+      keys.forEach((k, i) => {
+        if (res[i].status === 'fulfilled') { S.sea[k] = res[i].value; S.sea.err[k] = null; good++; }
+        else { S.sea.err[k] = res[i].reason.message; console.error('[SDX] sea & air', k, res[i].reason.message); }
+      });
+      S.sea.at = Date.now();
+      emit('sea');
+      if (!good) throw new Error('sea & air: every source failed');
+    }
+
+    async function runObs() {
+      const now = Date.now();
+      const out = new Map();
+      const errs = [];
+      const queue = [...SDX.obs.STATIONS];
+      await Promise.all(Array.from({ length: 4 }, async () => {
+        while (queue.length) {
+          const st = queue.shift();
+          try { out.set(st.id, SDX.obs.parse(await request(`${nwsBase()}/stations/${st.id}/observations/latest`, { name: 'obs', accept: 'application/geo+json' }), now)); }
+          catch (err) { errs.push(`${st.id}: ${err.message}`); }
+        }
+      }));
+      if (!out.size) { S.obs.err = errs[0] || 'no readings'; emit('obs'); throw new Error('station readings failed: ' + errs.join('; ')); }
+      S.obs.byId = out;
+      S.obs.at = now;
+      S.obs.err = errs.length ? `${errs.length} of ${SDX.obs.STATIONS.length} stations had no reading` : null;
+      emit('obs');
+    }
+
+    async function runSat() {
+      try {
+        const xml = await request(`${SDX.sat.BASE}/wmts.cgi?SERVICE=WMTS&REQUEST=GetCapabilities&layer=${SDX.sat.LAYER}`, { name: 'sat', timeoutMs: 20000, text: true });
+        const advertised = SDX.sat.parseDefaultTime(xml);
+        // Don't promise a frame we can't draw. GIBS lists a newest frame a little before its tiles exist (and a
+        // missing tile is a noisy 404), so start one step back and walk back (up to an hour) to the newest frame
+        // whose imagery over San Diego really is there.
+        const t = SDX.sat.tileXY(32.8, -117.1, 6);
+        let latest = null;
+        for (const iso of SDX.sat.candidates(advertised, 7).slice(1)) {
+          const probe = await fetch(SDX.sat.tileUrl(iso, 6, t.x, t.y));
+          if (probe.ok) { latest = iso; break; }
+        }
+        if (!latest) throw new Error(`no satellite frame since ${advertised} has imagery yet`);
+        S.sat.latest = latest;
+        S.sat.frames = SDX.sat.frames(latest, 8, 40);
+        S.sat.at = Date.now();
+        S.sat.err = null;
+        emit('sat');
+      } catch (err) {
+        S.sat.err = err.message;
+        emit('sat');
+        throw err;
+      }
+    }
+
+    // Rain over the county, from the live radar tiles themselves: count echo pixels inside the county box,
+    // now and 30 minutes ago. (Tiles are transparent where there is no echo.)
+    async function runRadar() {
+      try {
+        const Z = 7;
+        const tiles = SDX.radar.countyTiles(Z);
+        const frames = SDX.radar.frames();
+        const share = async (id) => {
+          let echo = 0;
+          let total = 0;
+          for (const t of tiles) {
+            const box = SDX.radar.pixelBox(t, Z);
+            if (!box) continue;
+            const bmp = await createImageBitmap(await request(SDX.radar.tileUrl(id, Z, t.x, t.y), { name: 'radar', blob: true }));
+            const c = document.createElement('canvas');
+            c.width = bmp.width; c.height = bmp.height;
+            const g = c.getContext('2d', { willReadFrequently: true });
+            g.drawImage(bmp, 0, 0);
+            const n = SDX.radar.echoCount(g.getImageData(0, 0, c.width, c.height).data, c.width, c.height, box);
+            echo += n.echo; total += n.total;
+          }
+          return { echo, total };
+        };
+        const [now, then] = await Promise.all([share(frames[5].id), share(frames[2].id)]);
+        S.radar = { at: Date.now(), now, then, err: null };
+        emit('radar');
+      } catch (err) {
+        S.radar.err = err.message;
+        emit('radar');
+        throw err;
+      }
+    }
+
+    const pollers = {
+      radar: poller(runRadar, { every: 5 * 60e3 }),
+      alerts: poller(runAlerts, { every: 10 * 60e3 }),
+      sea: poller(runSea, { every: 15 * 60e3 }),
+      obs: poller(runObs, { every: 10 * 60e3 }),
+      sat: poller(runSat, { every: 10 * 60e3 }),
+    };
+
+    return {
+      S, pollers, nwsBase,
+      on: (fn) => { subs.add(fn); return () => subs.delete(fn); },
+      poke: () => Object.values(pollers).forEach((p) => p.poke()),
+      stopAll: () => Object.values(pollers).forEach((p) => p.stop()),
+    };
+  })();
 
   // ==================================================================
   // MODULE 1: Microclimates & Marine Layer
@@ -1999,12 +2805,21 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
     let lastFog = -1;
     let lastClock = -1;
     let lastPhase = '';
+    let lastTileB = '';
     // Live NWS data: { byHood: Map(id -> {t, rh, sky, updated}), loading, done, total, ok, missing, updated }
     let live = null;
     let liveToken = 0;
     let lastNowCheck = 0;
     let refreshTimer = null;
     let onVisible = null;
+    let unsubLive = null;
+    let alertsOn = false;
+    let satCtl = null;            // { layers, latest, shown, timer, errors }
+    let radarCtl = null;          // { layers, shown, timer, bucket }
+    let obsLayer = null;
+    const obsMarkers = new Map();
+    let windLayer = null;
+    let winds = [];               // { n, el, key, rot }
 
     const avg = (a) => a.reduce((s, v) => s + v, 0) / a.length;
 
@@ -2075,7 +2890,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
     const colorFor = (v, metric) => (v == null ? '#5b6474' : metric === 'rh' ? rhColor(v) : heatColor(v));
 
     // ------------------------------------------------------------ NWS fetch (+ localStorage cache)
-    const nwsBase = () => (window.SDXDebug && window.SDXDebug.nwsBase) || 'https://api.weather.gov';
+    const nwsBase = LiveSky.nwsBase;
     const cacheGet = (k, ttl) => {
       try { const v = JSON.parse(localStorage.getItem(k)); if (v && Date.now() - v.t < ttl) return v.d; } catch { /* blocked or corrupt */ }
       return null;
@@ -2098,13 +2913,15 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
         if (!gridUrl) throw new Error('no forecast grid for this point');
         cacheSet(ptKey, gridUrl);
       }
-      const gKey = `sdx.nws.grid.${gridUrl}`;
+      const gKey = `sdx.nws.grid2.${gridUrl}`;
       let g = cacheGet(gKey, GRID_TTL);
       if (!g) {
         const p = SDX.nws.validateGridpoint(await getJSON(gridUrl)).properties;
         g = {
           uom: p.temperature.uom || 'wmoUnit:degC', updated: p.updateTime || null,
           t: p.temperature.values, rh: p.relativeHumidity.values, sky: p.skyCover.values,
+          ws: p.windSpeed ? p.windSpeed.values : [], wsUom: p.windSpeed ? p.windSpeed.uom || '' : '',
+          wd: p.windDirection ? p.windDirection.values : [],
         };
         cacheSet(gKey, g);
       }
@@ -2112,7 +2929,12 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       const isF = /degF$/.test(g.uom);
       const t = N.dayHours(N.expandSeries(g.t), dayStart).map((v) => (v == null ? null : isF ? v : N.cToF(v)));
       if (t.every((v) => v == null)) throw new Error('forecast has no temperatures for today');
-      return { t, rh: N.dayHours(N.expandSeries(g.rh), dayStart), sky: N.dayHours(N.expandSeries(g.sky), dayStart), updated: g.updated };
+      const toKmh = /m_s-1/.test(g.wsUom || '') ? 3.6 : /mi_h-1/.test(g.wsUom || '') ? 1.609344 : 1;
+      return {
+        t, rh: N.dayHours(N.expandSeries(g.rh), dayStart), sky: N.dayHours(N.expandSeries(g.sky), dayStart), updated: g.updated,
+        ws: N.dayHours(N.expandSeries(g.ws), dayStart).map((v) => (v == null ? null : v * toKmh)),
+        wd: N.dayHours(N.expandSeries(g.wd), dayStart),
+      };
     }
 
     const fmtUpdated = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { ...TZ_OPTS, hour: 'numeric', minute: '2-digit' }) : '');
@@ -2192,6 +3014,415 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       refreshMode(ctx);
     }
 
+    // ------------------------------------------------------------ live sky & sea layers
+    const lerpDir = (arr, hour) => {
+      const a = Math.floor(hour);
+      const b = Math.min(23, a + 1);
+      const va = arr[a];
+      const vb = arr[b];
+      if (va == null && vb == null) return null;
+      if (va == null) return vb;
+      if (vb == null) return va;
+      return SDX.math.lerpAngle(va, vb, hour - a);
+    };
+    const compass = (deg) => ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'][Math.round(deg / 22.5) % 16];
+    const windColor = (mph) => `hsl(200 85% ${clamp(46 + mph * 1.6, 46, 82).toFixed(0)}%)`;
+    const fmtAgo = (mins) => (mins < 60 ? `${mins} min ago` : `${Math.floor(mins / 60)}h ${mins % 60}m ago`);
+    const fmtStamp = (ms) => new Date(ms).toLocaleTimeString([], { ...TZ_OPTS, hour: 'numeric', minute: '2-digit' });
+    const fmtUntil = (iso) => { const t = Date.parse(iso); return Number.isFinite(t) ? new Date(t).toLocaleString([], { ...TZ_OPTS, weekday: 'short', hour: 'numeric' }) : ''; };
+    const toastOnce = new Set();
+    const toastFirst = (ctx, key, msg) => { if (!toastOnce.has(key)) { toastOnce.add(key); ctx.toast(msg); } };
+
+    // Wind (m/s-or-km/h grid values were normalised to km/h in fetchHood).
+    function windAt(ctx, n, hour) {
+      if (!isLive(ctx)) return null;
+      const d = live.byHood.get(n.id);
+      if (!d || !d.ws || !d.wd) return null;
+      const kmh = lerpSeries(d.ws, hour);
+      const from = lerpDir(d.wd, hour);
+      if (kmh == null || from == null) return null;
+      return { mph: SDX.nws.kmhToMph(kmh), from };
+    }
+
+    function syncWind(ctx) {
+      if (!ctx.state.wind) {
+        if (windLayer) { windLayer.remove(); windLayer = null; winds = []; }
+        return;
+      }
+      if (windLayer) return;
+      windLayer = L.layerGroup().addTo(ctx.layer);
+      const chev = '<path d="M-7 4 L0 -3 L7 4"/>';
+      winds = HOODS.map((n) => {
+        const m = L.marker([n.lat, n.lon], {
+          interactive: false, keyboard: false,
+          icon: L.divIcon({
+            className: 'sdx-icon', iconSize: [0, 0], iconAnchor: [0, 0],
+            html: `<div class="sdx-anchor"><div class="sdx-wind${n.tier === 2 ? ' tier-2' : ''}"><svg viewBox="-17 -17 34 34" aria-hidden="true">${[0, 1, 2].map((k) => chev.replace('<path', `<path style="--k:${k}"`)).join('')}</svg></div></div>`,
+          }),
+        }).addTo(windLayer);
+        return { n, el: m.getElement().querySelector('.sdx-wind'), key: 'x', rot: 0 };
+      });
+      renderWind(ctx, display ?? ctx.state.hour, true);
+    }
+
+    function renderWind(ctx, hour, force) {
+      if (!windLayer) return;
+      const show = ctx.state.wind && isLive(ctx) && ctx.isFocused();
+      for (const w of winds) {
+        const v = show ? windAt(ctx, w.n, hour) : null;
+        const key = v ? `${Math.round(v.mph * 2)}|${Math.round(v.from / 3)}` : 'x';
+        if (!force && key === w.key) continue;
+        const wasHidden = w.key === 'x';
+        w.key = key;
+        if (!v) { w.el.style.setProperty('--op', '0'); continue; }
+        const to = (v.from + 180) % 360; // "from" bearing -> heading
+        w.rot = wasHidden ? to : w.rot + ((((to - w.rot) % 360) + 540) % 360 - 180);
+        w.el.style.setProperty('--rot', w.rot.toFixed(1));
+        w.el.style.setProperty('--sc', clamp(0.7 + v.mph / 28, 0.7, 1.4).toFixed(2));
+        w.el.style.setProperty('--spd', clamp(v.mph / 6, 0.35, 3).toFixed(2));
+        w.el.style.setProperty('--c', windColor(v.mph));
+        w.el.style.setProperty('--op', v.mph < 1.5 ? '0.25' : '0.95');
+      }
+    }
+
+    // ---- station readings (observed vs forecast)
+    function obsForecast(st, o) {
+      if (!live || live.loading || o.at == null || SDX.time.dayKey(new Date(o.at)) !== live.dayKey) return null;
+      let best = null;
+      for (const n of HOODS) {
+        const d = SDX.geo.haversineMi(n, st);
+        if (!best || d < best.d) best = { n, d };
+      }
+      const d = best && live.byHood.get(best.n.id);
+      if (!d) return null;
+      const f = lerpSeries(d.t, SDX.time.hour(new Date(o.at)));
+      return f == null ? null : { f, area: best.n.name };
+    }
+
+    const sign = (d) => (d > 0 ? '+' : d < 0 ? '−' : '±');
+    const deltaPill = (d, cls = 'o-d') => (d == null ? '' : `<span class="${cls} mono ${d > 0 ? 'up' : d < 0 ? 'dn' : ''}">${sign(d)}${Math.abs(d)}°</span>`);
+
+    function obsPopupHTML(st, o, fc, delta) {
+      const stale = o.ageMin != null && o.ageMin > 180;
+      const when = o.at == null ? '' : `${fmtStamp(o.at)}${o.ageMin != null ? ` · ${fmtAgo(o.ageMin)}` : ''}`;
+      return `<div class="pp-head"><span class="badge" style="--bc:#f2b53a">Station</span><span class="muted mono">${esc(st.id)}</span></div>
+        <div class="pp-name">${esc(st.name)}</div>
+        <div class="pp-temp mono" style="color:${heatColor(o.tF)}">${Math.round(o.tF)}°F ${deltaPill(delta, 'o-d')}</div>
+        <div class="pp-stats"><span>RH <b class="mono">${o.rh == null ? '—' : Math.round(o.rh) + '%'}</b></span><span>${o.windMph == null ? 'wind —' : `wind <b class="mono">${Math.round(o.windMph)} mph</b>${o.windFromDeg == null ? '' : ' ' + compass(o.windFromDeg)}`}</span></div>
+        <div class="pp-note">${esc(o.desc || 'Observation')} · ${when}${stale ? ' · stale' : ''}<br>${fc ? `Forecast for ${esc(fc.area)}: ${Math.round(fc.f)}°F` : 'Switch Data to Live to compare with the NWS forecast.'}</div>`;
+    }
+
+    function syncObs(ctx) {
+      if (!ctx.state.obs) {
+        if (obsLayer) { obsLayer.remove(); obsLayer = null; obsMarkers.clear(); }
+        return;
+      }
+      const S = LiveSky.S.obs;
+      if (!obsLayer) obsLayer = L.layerGroup().addTo(ctx.layer);
+      for (const st of SDX.obs.STATIONS) {
+        const o = S.byId.get(st.id);
+        let m = obsMarkers.get(st.id);
+        if (!o) { if (m) { m.remove(); obsMarkers.delete(st.id); } continue; }
+        const fc = obsForecast(st, o);
+        const delta = fc ? SDX.obs.delta(fc.f, o.tF) : null;
+        const stale = o.ageMin != null && o.ageMin > 180;
+        const icon = L.divIcon({
+          className: 'sdx-icon', iconSize: [0, 0], iconAnchor: [0, 0],
+          html: `<div class="sdx-anchor"><div class="sdx-obs${stale ? ' stale' : ''}" style="--c:${heatColor(o.tF)}"><span class="o-t mono">${Math.round(o.tF)}°</span>${deltaPill(delta)}<span class="o-id mono">${esc(st.id)}</span></div></div>`,
+        });
+        if (!m) {
+          m = L.marker([st.lat, st.lon], { icon, keyboard: true, riseOnHover: true, zIndexOffset: 400 }).addTo(obsLayer);
+          m.bindPopup('', { offset: [0, -10], maxWidth: 260, minWidth: 210, autoPanPaddingTopLeft: [20, 90] });
+          obsMarkers.set(st.id, m);
+        } else m.setIcon(icon);
+        m.getPopup().setContent(obsPopupHTML(st, o, fc, delta));
+        const el = m.getElement();
+        if (el) { el.setAttribute('role', 'button'); el.setAttribute('aria-label', `${st.name} station reading ${Math.round(o.tF)} degrees`); }
+      }
+    }
+
+    function renderObsCard(ctx) {
+      const ui = ctx.ui;
+      if (!ui.obsCard) return;
+      ui.obsCard.hidden = !ctx.state.obs;
+      if (!ctx.state.obs) return;
+      const S = LiveSky.S.obs;
+      if (!S.byId.size) { ui.obsSub.textContent = S.err ? 'unavailable' : 'loading…'; ui.obsRows.innerHTML = ''; return; }
+      const rows = SDX.obs.STATIONS.filter((st) => S.byId.has(st.id)).map((st) => {
+        const o = S.byId.get(st.id);
+        const fc = obsForecast(st, o);
+        return { st, o, fc, delta: fc ? SDX.obs.delta(fc.f, o.tF) : null };
+      }).sort((a, b) => (b.delta == null ? -1 : Math.abs(b.delta)) - (a.delta == null ? -1 : Math.abs(a.delta)));
+      const ds = rows.filter((r) => r.delta != null).map((r) => Math.abs(r.delta));
+      ui.obsSub.textContent = ds.length ? `avg miss ${(ds.reduce((x, y) => x + y, 0) / ds.length).toFixed(1)}° · ${fmtStamp(S.at)}` : `${rows.length} stations · Live data compares`;
+      ui.obsRows.innerHTML = rows.map(({ st, o, fc, delta }) => `<div class="obs-row"><span><b>${esc(st.name)}</b> <span class="muted mono">${esc(st.id)}</span></span><span class="mono">${Math.round(o.tF)}°</span><span class="mono muted">${fc ? Math.round(fc.f) + '°' : '—'}</span>${delta == null ? '<span class="d mono muted">—</span>' : deltaPill(delta, 'd')}</div>`).join('')
+        + (S.err ? `<p class="sub" style="margin-top:6px">${esc(S.err)}</p>` : '');
+    }
+
+    // ---- satellite (GOES-West GeoColor via NASA GIBS), 8 frames, crossfaded
+    const satText = (iso) => `${fmtClockPT(new Date(iso))} PT · ${fmtAgo(Math.max(0, SDX.sat.ageMin(iso, Date.now())))}`;
+
+    function stopSat() {
+      if (!satCtl) return;
+      clearTimeout(satCtl.timer);
+      satCtl.layers.forEach((l) => l.remove());
+      satCtl = null;
+    }
+
+    function showSatFrame(ctx, i) {
+      if (!satCtl) return;
+      satCtl.shown = i;
+      satCtl.layers.forEach((l, k) => l.setOpacity(k === i ? 1 : 0));
+      syncLayerUI(ctx);
+    }
+
+    function drawSat(ctx) {
+      const S = LiveSky.S.sat;
+      if (!ctx.state.sat || !S.frames.length) return;
+      if (satCtl && satCtl.latest === S.latest) return;
+      stopSat();
+      const map = ctx.map;
+      const layers = S.frames.map((iso) => L.tileLayer(SDX.sat.tileUrl(iso, '{z}', '{x}', '{y}'), {
+        pane: 'sat', opacity: 0, maxNativeZoom: 7, maxZoom: 18, keepBuffer: 1, updateWhenIdle: true, crossOrigin: 'anonymous',
+        attribution: 'Satellite: GOES-West via NASA GIBS',
+      }).addTo(map));
+      satCtl = { layers, latest: S.latest, shown: -1, timer: 0, errors: 0 };
+      layers.forEach((l) => l.on('tileerror', () => { if (satCtl) { satCtl.errors++; syncLayerUI(ctx); } }));
+      showSatFrame(ctx, layers.length - 1);
+      loopSat(ctx);
+    }
+
+    function loopSat(ctx) {
+      if (!satCtl) return;
+      clearTimeout(satCtl.timer);
+      if (!ctx.state.loop) { showSatFrame(ctx, satCtl.layers.length - 1); return; }
+      let i = 0;
+      const step = () => {
+        if (!satCtl || !ctx.state.loop) return;
+        showSatFrame(ctx, i);
+        const last = i === satCtl.layers.length - 1;
+        satCtl.timer = setTimeout(step, last ? 2200 : 950);
+        i = last ? 0 : i + 1;
+      };
+      step();
+    }
+
+    function onSatData(ctx) {
+      const S = LiveSky.S.sat;
+      if (!ctx.state.sat) return;
+      if (S.err && !S.frames.length) {
+        toastFirst(ctx, 'sat', 'Satellite imagery is unavailable right now');
+        ctx.setState({ sat: false, loop: false });
+        return;
+      }
+      if (!S.err) drawSat(ctx);
+      syncLayerUI(ctx);
+    }
+
+    // ---- rain radar (NEXRAD via Iowa State): 6 frames, 10 minutes apart, crossfaded
+    const radarBucket = () => Math.floor(Date.now() / 300e3); // tiles refresh about every 5 minutes
+    const radarTpl = (id) => `${SDX.radar.tileUrl(id, '{z}', '{x}', '{y}')}?t=${radarBucket()}`;
+
+    function stopRadar() {
+      if (!radarCtl) return;
+      clearTimeout(radarCtl.timer);
+      radarCtl.layers.forEach((l) => l.remove());
+      radarCtl = null;
+    }
+
+    function showRadarFrame(ctx, i) {
+      if (!radarCtl) return;
+      radarCtl.shown = i;
+      radarCtl.layers.forEach((l, k) => l.setOpacity(k === i ? 1 : 0));
+      syncLayerUI(ctx);
+    }
+
+    function drawRadar(ctx) {
+      if (!ctx.state.radar || radarCtl) return;
+      const frames = SDX.radar.frames();
+      const layers = frames.map((f) => L.tileLayer(radarTpl(f.id), {
+        pane: 'radar', opacity: 0, maxNativeZoom: 9, maxZoom: 18, keepBuffer: 1, updateWhenIdle: true, crossOrigin: 'anonymous',
+        attribution: 'Radar: NOAA NEXRAD via Iowa State IEM',
+      }).addTo(ctx.map));
+      radarCtl = { layers, frames, shown: -1, timer: 0, bucket: radarBucket(), errors: 0 };
+      layers.forEach((l) => l.on('tileerror', () => { if (radarCtl) { radarCtl.errors++; syncLayerUI(ctx); } }));
+      showRadarFrame(ctx, layers.length - 1);
+      loopRadar(ctx);
+    }
+
+    function loopRadar(ctx) {
+      if (!radarCtl) return;
+      clearTimeout(radarCtl.timer);
+      if (!ctx.state.rloop) { showRadarFrame(ctx, radarCtl.layers.length - 1); return; }
+      let i = 0;
+      const step = () => {
+        if (!radarCtl || !ctx.state.rloop) return;
+        showRadarFrame(ctx, i);
+        const last = i === radarCtl.layers.length - 1;
+        radarCtl.timer = setTimeout(step, last ? 2200 : 800);
+        i = last ? 0 : i + 1;
+      };
+      step();
+    }
+
+    // New radar data arrived (about every 5 min): point the frame layers at fresh tiles.
+    function refreshRadarTiles() {
+      if (!radarCtl || radarCtl.bucket === radarBucket()) return;
+      radarCtl.bucket = radarBucket();
+      radarCtl.layers.forEach((l, k) => l.setUrl(radarTpl(radarCtl.frames[k].id)));
+    }
+
+    const RADAR_WORD = { increasing: 'getting heavier', decreasing: 'easing', steady: 'steady', none: '' };
+    function radarSummary() {
+      const R = LiveSky.S.radar;
+      if (R.err && !R.at) return { key: 'bad', text: 'Rain radar unavailable right now' };
+      if (!R.now) return { key: 'wait', text: 'Checking rain radar…' };
+      const c = SDX.radar.classify(R.now.echo, R.now.total);
+      if (!c) return { key: 'bad', text: 'Rain radar unavailable right now' };
+      const tr = R.then && R.then.total ? SDX.radar.trend(c.share, R.then.echo / R.then.total) : null;
+      const word = tr && RADAR_WORD[tr] ? ` · ${RADAR_WORD[tr]} vs 30 min ago` : '';
+      return { key: c.key, text: `${c.label} over the county${word} · ${fmtStamp(R.at)}${R.err ? ' · stale' : ''}` };
+    }
+
+    function renderRadarSummary(ctx) {
+      const el = ctx.ui.radarSum;
+      if (!el) return;
+      const r = radarSummary();
+      el.className = `radar-sum k-${r.key}`;
+      el.querySelector('span').textContent = r.text;
+      if (r.key === 'bad') toastFirst(ctx, 'radar', 'Rain radar is unavailable right now');
+    }
+
+    // ---- alerts + sea & air
+    // "A; B; C; D; E" -> "A; B; C +2 more" so a county-wide watch doesn't print every zone it touches.
+    const areasShort = (a, n = 3) => { const parts = String(a || '').split('; ').filter(Boolean); return parts.length > n ? `${parts.slice(0, n).join('; ')} +${parts.length - n} more` : parts.join('; '); };
+    const ALERT_COLORS = { 4: '#ff5d6c', 3: '#e5484d', 2: '#e8a21a', 1: '#4a9cf0', 0: '#8a94a6' };
+
+    function renderAlerts(ctx) {
+      const el = document.getElementById('alerts');
+      const A = LiveSky.S.alerts;
+      const ui = ctx.ui;
+      if (ui.alCard) {
+        ui.alSub.textContent = A.err && !A.at ? 'unavailable' : A.at ? `checked ${fmtStamp(A.at)}` : 'checking…';
+        ui.alRows.innerHTML = A.items.length
+          ? A.items.map((a) => `<div class="al-row"><b style="color:${ALERT_COLORS[a.level]}">${esc(a.event)}</b> · until ${esc(fmtUntil(a.ends))}<br>${esc(areasShort(a.areaDesc))}</div>`).join('')
+          : A.err && !A.at ? `<div class="al-row">Couldn't reach the National Weather Service alerts feed.</div>`
+            : '<div class="al-row">No active heat, fog, surf, wind, fire or flood alerts for San Diego County.</div>'
+          + (A.err ? `<div class="al-row muted">${esc(A.err)}</div>` : '');
+      }
+      if (A.err && !A.at) toastFirst(ctx, 'alerts', 'Weather alerts are unavailable right now');
+      if (!el) return;
+      const items = alertsOn && ctx.isFocused() ? A.items : [];
+      const sig = items.map((a) => a.ids.join('+')).join('|');
+      if (sig === el._sig) return;
+      el._sig = sig;
+      if (!items.length) {
+        el.classList.remove('is-on', 'is-open');
+        el.setAttribute('aria-hidden', 'true');
+        return;
+      }
+      const top = items[0];
+      el.innerHTML = `<button type="button" class="al-top" aria-expanded="false">
+          <span class="al-ico" style="--c:${ALERT_COLORS[top.level]}">${icon('triangle-alert')}</span>
+          <span class="al-text"><b>${esc(top.event)}</b><span>until ${esc(fmtUntil(top.ends))} · ${esc(top.areaDesc.split(';')[0])}</span></span>
+          ${items.length > 1 ? `<span class="al-more mono">+${items.length - 1}</span>` : ''}
+          <span class="al-chev">${icon('chevron-down')}</span>
+        </button>
+        <div class="al-body"><ul>${items.map((a) => `<li class="al-item" style="--c:${ALERT_COLORS[a.level]}"><i></i><span><b>${esc(a.event)}</b> · until ${esc(fmtUntil(a.ends))}<br>${esc(areasShort(a.areaDesc))}</span></li>`).join('')}</ul></div>`;
+      paintIcons();
+      el.classList.remove('is-open');
+      el.setAttribute('aria-hidden', 'false');
+      requestAnimationFrame(() => el.classList.add('is-on'));
+    }
+
+    function miniSpark(vals) {
+      const v = vals.filter(Number.isFinite);
+      if (v.length < 2) return '';
+      const lo = Math.min(...v);
+      const rng = (Math.max(...v) - lo) || 1;
+      const d = v.map((x, i) => `${i ? 'L' : 'M'}${((i / (v.length - 1)) * 100).toFixed(1)} ${(23 - ((x - lo) / rng) * 20).toFixed(1)}`).join('');
+      return `<svg class="mini" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true"><path pathLength="1" vector-effect="non-scaling-stroke" d="${d}"/></svg>`;
+    }
+    const AQI_COLORS = ['#199e70', '#c98500', '#d95926', '#e5484d', '#a855f7', '#9f1239'];
+
+    function renderSea(ctx) {
+      const ui = ctx.ui;
+      if (!ui.sea) return;
+      const S = LiveSky.S.sea;
+      const set = (k, { value, fmt, sub, series, color }) => {
+        const t = ui.sea[k];
+        const bad = value == null;
+        const err = S.err[k === 'waves' ? 'marine' : k];
+        t.el.classList.toggle('is-bad', bad);
+        t.el.classList.toggle('is-loading', bad && !err);
+        t.el.classList.toggle('is-stale', !bad && !!err);
+        t.el.style.setProperty('--c', bad ? '#6f7f96' : color);
+        if (bad) { t.num.textContent = '—'; t.num._v = undefined; } else tweenNumber(t.num, value, { fmt });
+        t.sub.textContent = bad ? (err ? 'unavailable' : 'loading…') : sub + (err ? ' · stale' : '');
+        const sig = series && series.length ? series.join(',') : '';
+        if (t.sig !== sig) { t.sig = sig; t.mini.innerHTML = bad ? '' : miniSpark(series || []); }
+      };
+      const w = S.water;
+      set('water', { value: w ? w.tF : null, fmt: (v) => v.toFixed(1), sub: 'La Jolla · NOAA', series: w ? w.series.filter((_, i, a) => i % 10 === 0 || i === a.length - 1) : [], color: '#3987e5' });
+      const m = S.marine;
+      set('waves', { value: m ? m.waveFt : null, fmt: (v) => v.toFixed(1), sub: m && m.periodS != null ? `${m.periodS.toFixed(0)} s period` : 'Open-Meteo', series: m ? m.waveSeries : [], color: '#22d3ee' });
+      const a = S.air;
+      const cat = a ? SDX.air.category(a.aqi) : null;
+      set('air', { value: a ? a.aqi : null, fmt: (v) => Math.round(v), sub: cat ? cat.label : '', series: a ? a.series : [], color: cat ? AQI_COLORS[cat.level] : '#8a94a6' });
+      const failed = Object.values(S.err).filter(Boolean).length;
+      ui.seaSub.textContent = !S.at ? 'checking…' : failed ? `${failed} of 3 unavailable` : `updated ${fmtStamp(S.at)}`;
+      if (S.at && failed === 3) toastFirst(ctx, 'sea', 'Water, wave and air-quality data are unavailable right now');
+    }
+
+    // Coastal average sky cover (live) -> "clears around ..."
+    function renderClearing(ctx) {
+      const el = ctx.ui.clearLine;
+      if (!el) return;
+      if (!isLive(ctx)) { el.hidden = true; return; }
+      const coastal = HOODS.filter((n) => n.zone === 'coastal').map((n) => live.byHood.get(n.id)).filter(Boolean);
+      const sky = Array.from({ length: 24 }, (_, h) => { const v = coastal.map((d) => d.sky[h]).filter((x) => x != null); return v.length ? avg(v) : null; });
+      const r = SDX.nws.clearingHour(sky);
+      const back = r.returnAt != null ? ` · cloud returns around <b>${fmtHour(r.returnAt)}</b>` : '';
+      const html = r.state === 'clearing' ? `Coastal clouds break up around <b>${fmtHour(r.at)}</b>${back}`
+        : r.state === 'clear' ? `Clear along the coast${back}`
+          : r.state === 'cloudy' ? 'Coastal cloud stays all day' : '';
+      el.innerHTML = html;
+      el.hidden = !html;
+    }
+
+    function syncLayerUI(ctx) {
+      const ui = ctx.ui;
+      if (!ui.tgls) return;
+      const s = ctx.state;
+      const S = LiveSky.S;
+      for (const b of ui.tgls) b.setAttribute('aria-pressed', String(!!s[b.dataset.layer]));
+      ui.satLine.hidden = !s.sat;
+      if (s.sat) {
+        const bad = !!S.sat.err && !S.sat.frames.length;
+        const shownIso = satCtl && satCtl.shown >= 0 ? S.sat.frames[satCtl.shown] : S.sat.latest;
+        ui.satText.textContent = bad ? 'Satellite unavailable' : !S.sat.frames.length ? 'Loading satellite…'
+          : `Satellite ${satText(shownIso)}${satCtl && satCtl.errors ? ` · ${satCtl.errors} tiles missing` : ''}`;
+        ui.satLine.classList.toggle('bad', bad);
+        ui.loopBtn.setAttribute('aria-pressed', String(s.loop));
+      }
+      ui.obsLine.hidden = !s.obs;
+      if (s.obs) {
+        const n = S.obs.byId.size;
+        ui.obsText.textContent = n ? `Stations ${n}/${SDX.obs.STATIONS.length} · ${fmtStamp(S.obs.at)}${isLive(ctx) ? '' : ' · go Live for ±'}` : S.obs.err ? 'Stations unavailable' : 'Loading stations…';
+        ui.obsLine.classList.toggle('bad', !n && !!S.obs.err);
+      }
+      ui.radarLine.hidden = !s.radar;
+      if (s.radar) {
+        const r = radarSummary();
+        const fr = radarCtl && radarCtl.shown >= 0 ? radarCtl.frames[radarCtl.shown] : null;
+        ui.radarText.textContent = s.rloop && fr ? `Radar · ${fr.minAgo ? fr.minAgo + ' min ago' : 'now'}` : `Radar · ${r.text}${radarCtl && radarCtl.errors ? ' · some tiles missing' : ''}`;
+        ui.radarLine.classList.toggle('bad', r.key === 'bad');
+        ui.rloopBtn.setAttribute('aria-pressed', String(s.rloop));
+      }
+      ui.windLine.hidden = !s.wind;
+      if (s.wind) ui.windText.textContent = pending(ctx) ? 'Loading wind…' : isLive(ctx) ? 'Wind · NWS grid · arrows = heading' : 'Wind needs Live data';
+    }
+
     // ------------------------------------------------------------ drawing
     function fogRings(f, inner) {
       const off = [];
@@ -2269,6 +3500,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       return `${head}
         <div class="pp-temp mono" style="color:${heatColor(v.t)}">${Math.round(v.t)}°F</div>
         <div class="pp-stats"><span>RH <b class="mono">${v.rh == null ? '—' : Math.round(v.rh) + '%'}</b></span><span>${sky}</span></div>
+        ${(() => { const w = windAt(ctx, n, hour); return w ? `<div class="pp-stats"><span>Wind <b class="mono">${Math.round(w.mph)} mph</b> from ${compass(w.from)}</span></div>` : ''; })()}
         ${sparkSVG(series, hour, ZONE_COLOR[n.zone])}
         <div class="pp-note">${note}</div>`;
     }
@@ -2306,6 +3538,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
           p.root.classList.toggle('no-data', v == null && !pending(ctx));
         }
       }
+      renderWind(ctx, hour, force);
       if (openPin && (force || openPin._lastPopupMin !== Math.round(hour * 12))) {
         openPin._lastPopupMin = Math.round(hour * 12);
         openPin.m.getPopup().setContent(popupHTML(ctx, openPin.n, hour));
@@ -2330,6 +3563,10 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
           const val = w[k].toFixed(3);
           if (ambient[k].style.opacity !== val) ambient[k].style.opacity = val;
         }
+        // The basemap itself brightens toward noon and dims at night (only while the tint is on and in focus).
+        const sun = clamp(w.day * 1.25 + (w.dawn + w.dusk) * 0.45, 0, 1);
+        const b = ctx.state.tint && ctx.isFocused() ? (0.78 + 0.22 * sun).toFixed(2) : '';
+        if (b !== lastTileB) { lastTileB = b; if (b) ctx.map.getContainer().style.setProperty('--tile-b', b); else ctx.map.getContainer().style.removeProperty('--tile-b'); }
       }
 
       // Throttled clock broadcast for any other module that wants to follow time-of-day.
@@ -2405,9 +3642,13 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
           ? 'Live: National Weather Service forecast grid for today (api.weather.gov), cached for an hour. Areas without data show —; nothing is filled in.'
           : 'Simulated model of a typical late-summer day. Temperatures and fog are illustrative, not live weather.';
       }
+      renderClearing(ctx);
+      syncLayerUI(ctx);
     }
 
     function refreshMode(ctx) {
+      syncObs(ctx);
+      renderObsCard(ctx);
       syncModeUI(ctx);
       if (display != null) render(ctx, display, true);
       ctx.refreshLegend();
@@ -2420,6 +3661,13 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       for (const p of pins) { const el = p.m.getElement(); if (el) el.tabIndex = off ? -1 : 0; }
       if (off && openPin) openPin.m.closePopup();
       if (ambient) ambient.el.classList.toggle('is-off', off || !ctx.state.tint);
+      const sp = ctx.map.getPane('sat');
+      if (sp) sp.classList.toggle('is-off', off);
+      const rp = ctx.map.getPane('radar');
+      if (rp) rp.classList.toggle('is-off', off);
+      renderAlerts(ctx);
+      lastTileB = null; // re-evaluate the basemap brightness (tint / focus changed)
+      if (display != null) render(ctx, display, true);
     }
 
     function syncSlider(ctx) {
@@ -2465,7 +3713,21 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       accent: '#38bdf8',
 
       // Opens at the current San Diego time and follows the real clock until you scrub.
-      createState: () => ({ hour: clamp(SDX.time.hour(), 6, 22), follow: true, playing: false, fog: true, tint: true, source: 'sim', metric: 'temp' }),
+      createState: () => {
+        const u = urlFor('microclimates');
+        const layers = u.layers || [];
+        const wind = layers.includes('wind');
+        return {
+          hour: u.hour ?? clamp(SDX.time.hour(), 6, 22), follow: u.hour == null, playing: false, fog: true, tint: true,
+          source: wind ? 'live' : u.source || 'sim', metric: u.metric || 'temp',
+          sat: layers.includes('sat'), loop: false, obs: layers.includes('obs'), wind,
+          radar: layers.includes('radar'), rloop: false,
+        };
+      },
+      urlState: (ctx) => ({
+        hour: ctx.state.follow ? undefined : ctx.state.hour, source: ctx.state.source, metric: ctx.state.metric,
+        layers: ['sat', 'obs', 'wind', 'radar'].filter((k) => ctx.state[k]),
+      }),
       bounds: () => L.latLngBounds(HOODS.map((n) => [n.lat, n.lon])),
 
       onActivate(ctx) {
@@ -2474,7 +3736,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
         lastFog = -1;
         lastPhase = '';
 
-        for (const [name, z] of [['fog', 390], ['fogtex', 391], ['ambient', 250]]) {
+        for (const [name, z] of [['fog', 390], ['fogtex', 391], ['ambient', 250], ['sat', 245], ['radar', 246]]) {
           if (!map.getPane(name)) { const p = map.createPane(name); p.style.zIndex = String(z); }
         }
         const base = L.svg({ pane: 'fog', padding: 0.6 });
@@ -2526,7 +3788,34 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
 
         if (ctx.state.source === 'live' && !live) loadLive(ctx);
         refreshTimer = setInterval(() => maybeRefreshLive(ctx), 60e3);
-        onVisible = () => { if (document.visibilityState === 'visible') { lastNowCheck = 0; maybeRefreshLive(ctx); } };
+        onVisible = () => { if (document.visibilityState === 'visible') { lastNowCheck = 0; maybeRefreshLive(ctx); LiveSky.poke(); } };
+        alertsOn = true;
+        const bannerEl = document.getElementById('alerts');
+        if (bannerEl) bannerEl.onclick = (e) => {
+          if (!e.target.closest('.al-top')) return;
+          const open = bannerEl.classList.toggle('is-open');
+          bannerEl.querySelector('.al-top').setAttribute('aria-expanded', String(open));
+        };
+        unsubLive = LiveSky.on((kind) => {
+          if (kind === 'alerts') renderAlerts(ctx);
+          else if (kind === 'sea') renderSea(ctx);
+          else if (kind === 'obs') {
+            if (LiveSky.S.obs.err && !LiveSky.S.obs.byId.size && ctx.state.obs) {
+              toastFirst(ctx, 'obs', 'Station readings are unavailable right now');
+              ctx.setState({ obs: false });
+            }
+            syncObs(ctx); renderObsCard(ctx); syncLayerUI(ctx);
+          } else if (kind === 'sat') onSatData(ctx);
+          else if (kind === 'radar') { renderRadarSummary(ctx); refreshRadarTiles(); syncLayerUI(ctx); }
+        });
+        LiveSky.pollers.radar.start();
+        if (ctx.state.radar) drawRadar(ctx);
+        LiveSky.pollers.alerts.start();
+        LiveSky.pollers.sea.start();
+        if (ctx.state.sat) LiveSky.pollers.sat.start();
+        if (ctx.state.obs) LiveSky.pollers.obs.start();
+        syncObs(ctx);
+        syncWind(ctx);
         document.addEventListener('visibilitychange', onVisible);
         render(ctx, display, true);
         applyFocusVisibility(ctx);
@@ -2540,7 +3829,20 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
         if (live) live.refreshing = false;
         clearInterval(refreshTimer);
         document.removeEventListener('visibilitychange', onVisible);
+        alertsOn = false;
+        renderAlerts(ctx);
+        if (unsubLive) { unsubLive(); unsubLive = null; }
+        LiveSky.stopAll();
+        stopSat();
+        stopRadar();
+        const satPane = map.getPane('sat');
+        if (satPane) satPane.classList.add('is-off');
+        const radarPane = map.getPane('radar');
+        if (radarPane) radarPane.classList.add('is-off');
+        obsLayer = null; obsMarkers.clear(); windLayer = null; winds = [];
         map.getContainer().classList.remove('sdx-temps-off', 'mc-far', 'mc-loading');
+        map.getContainer().style.removeProperty('--tile-b');
+        lastTileB = '';
         map.off('move zoomend viewreset resize', onMapMove);
         map.off('zoomend', onZoomTier);
         map.off('popupopen', onPopupOpen);
@@ -2559,6 +3861,26 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
 
       onStateChange(ctx, prev) {
         const s = ctx.state;
+        if (s.sat !== prev.sat) {
+          const sp = ctx.map.getPane('sat');
+          if (sp) sp.classList.toggle('is-off', !s.sat || !ctx.isFocused());
+          if (s.sat) { LiveSky.pollers.sat.start(); drawSat(ctx); } else { LiveSky.pollers.sat.stop(); stopSat(); if (s.loop) ctx.setState({ loop: false }); }
+          syncLayerUI(ctx);
+        }
+        if (s.loop !== prev.loop) loopSat(ctx);
+        if (s.radar !== prev.radar) {
+          const rp = ctx.map.getPane('radar');
+          if (rp) rp.classList.toggle('is-off', !s.radar || !ctx.isFocused());
+          if (s.radar) drawRadar(ctx); else { stopRadar(); if (s.rloop) ctx.setState({ rloop: false }); }
+          syncLayerUI(ctx);
+        }
+        if (s.rloop !== prev.rloop) loopRadar(ctx);
+        if (s.obs !== prev.obs) {
+          if (s.obs) { LiveSky.pollers.obs.start(); syncObs(ctx); } else { LiveSky.pollers.obs.stop(); syncObs(ctx); }
+          renderObsCard(ctx);
+          syncLayerUI(ctx);
+        }
+        if (s.wind !== prev.wind) { syncWind(ctx); syncLayerUI(ctx); }
         if (s.playing !== prev.playing) syncPlay(ctx);
         if (s.tint !== prev.tint) { applyFocusVisibility(ctx); syncModeUI(ctx); }
         if (s.follow !== prev.follow) { syncFollow(ctx); if (s.follow) lastNowCheck = 0; }
@@ -2638,6 +3960,19 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
             <span class="eyebrow">Show</span>
             ${segHTML('metric', [['temp', 'Temperature'], ['rh', 'Humidity']], 'Marker metric')}
           </div>
+          <div class="layer-row">
+            <span class="eyebrow">Live layers</span>
+            <div class="tgl-group" role="group" aria-label="Live map layers">
+              <button type="button" class="tgl" data-layer="sat" aria-pressed="false" title="Real GOES-West satellite imagery (NASA GIBS)">${icon('satellite')}Satellite</button>
+              <button type="button" class="tgl" data-layer="obs" aria-pressed="false" title="Real airport weather stations (NWS)">${icon('radio-tower')}Stations</button>
+              <button type="button" class="tgl" data-layer="wind" aria-pressed="false" title="Wind from the NWS forecast grid">${icon('wind')}Wind</button>
+              <button type="button" class="tgl" data-layer="radar" aria-pressed="false" title="Live NEXRAD rain radar, last 50 minutes">${icon('cloud-rain')}Radar</button>
+            </div>
+          </div>
+          <div class="layer-line sat-line" hidden><span class="mono sat-text">Loading satellite…</span><button type="button" class="tgl loop-btn" aria-pressed="false" title="Play the last few hours of satellite frames">${icon('repeat')}Loop</button></div>
+          <div class="layer-line obs-line" hidden><span class="mono obs-text"></span></div>
+          <div class="layer-line radar-line" hidden><span class="mono radar-text">Checking rain radar…</span><button type="button" class="tgl rloop-btn" aria-pressed="false" title="Play the last 50 minutes of radar">${icon('repeat')}Loop</button></div>
+          <div class="layer-line wind-line" hidden><span class="mono wind-text"></span></div>
           <div class="dock-row" style="margin-top:12px">
             <div class="flex items-center gap-3">
               <button type="button" class="switch sw-fog" role="switch" style="--accent:#38bdf8" aria-label="Marine layer overlay"></button>
@@ -2668,6 +4003,17 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
         ui.segMetric = el.querySelector('.seg[data-seg="metric"]');
         ui.nowPill = el.querySelector('.now-pill');
         ui.nowBtn = el.querySelector('.now');
+        ui.tgls = [...el.querySelectorAll('.tgl[data-layer]')];
+        ui.satLine = el.querySelector('.sat-line');
+        ui.satText = el.querySelector('.sat-text');
+        ui.loopBtn = el.querySelector('.loop-btn');
+        ui.obsLine = el.querySelector('.obs-line');
+        ui.obsText = el.querySelector('.obs-text');
+        ui.radarLine = el.querySelector('.radar-line');
+        ui.radarText = el.querySelector('.radar-text');
+        ui.rloopBtn = el.querySelector('.rloop-btn');
+        ui.windLine = el.querySelector('.wind-line');
+        ui.windText = el.querySelector('.wind-text');
         // Any manual time change stops following the real clock; Now resumes it.
         const stopFollow = () => { if (ctx.state.follow) ctx.setState({ follow: false }); };
 
@@ -2692,6 +4038,15 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
         ui.tintSwitch.addEventListener('click', () => ctx.setState({ tint: !ctx.state.tint }));
         bindSeg(ui.segSrc, (v) => ctx.setState({ source: v }));
         bindSeg(ui.segMetric, (v) => ctx.setState({ metric: v }));
+        ui.tgls.forEach((b) => b.addEventListener('click', () => {
+          const k = b.dataset.layer;
+          if (k === 'wind' && !ctx.state.wind && ctx.state.source !== 'live') {
+            ctx.toast('Wind comes from the NWS forecast grid, so Data switched to Live');
+            ctx.setState({ wind: true, source: 'live' });
+          } else ctx.setState({ [k]: !ctx.state[k] });
+        }));
+        ui.loopBtn.addEventListener('click', () => ctx.setState({ loop: !ctx.state.loop }));
+        ui.rloopBtn.addEventListener('click', () => ctx.setState({ rloop: !ctx.state.rloop }));
         ui.nowBtn.addEventListener('click', () => {
           if (ctx.state.playing) ctx.setState({ playing: false });
           setHour(ctx, SDX.time.hour());
@@ -2707,6 +4062,11 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
 
       renderSidebar(el, ctx) {
         el.innerHTML = `
+          <section class="card al-card">
+            <div class="card-h"><h3>Weather alerts</h3><span class="muted al-sub">checking…</span></div>
+            <div class="al-rows"></div>
+            <div class="radar-sum k-wait"><i aria-hidden="true"></i><span>Checking rain radar…</span></div>
+          </section>
           <section class="card">
             <div class="card-h"><h3 class="chart-title">24-hour temperature</h3><span class="muted chart-sub">by zone · °F</span></div>
             <div class="series-legend">${SERIES.map((s) => `<span class="it" style="--c:${s.color}"><i></i>${SDX.ZONES[s.zone].label} <b class="mono">--</b></span>`).join('')}</div>
@@ -2726,6 +4086,18 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
             <div class="card-h"><h3 class="meter-title">Marine layer coverage</h3><b class="mono meter-v">--</b></div>
             <div class="meter"><i></i></div>
             <p class="sub meter-note" style="margin-top:9px"></p>
+            <p class="clear-line" hidden></p>
+          </section>
+          <section class="card">
+            <div class="card-h"><h3>Sea &amp; air</h3><span class="muted sea-sub">checking…</span></div>
+            <div class="sea-grid">
+              ${[['water', 'Water', '°F'], ['waves', 'Waves', 'ft'], ['air', 'Air quality', 'AQI']].map(([k, n, u]) => `<div class="sea-tile is-bad" data-k="${k}"><div class="tn"><i></i>${n}</div><div class="tv mono"><span class="num">—</span><small>${u}</small></div><div class="th">loading…</div><div class="mini-wrap"></div></div>`).join('')}
+            </div>
+          </section>
+          <section class="card obs-card" hidden>
+            <div class="card-h"><h3>Forecast check</h3><span class="muted obs-sub"></span></div>
+            <div class="obs-rows"></div>
+            <p class="sub" style="margin-top:8px">Real airport readings (NWS) against the forecast grid for the nearest area, at the time of each reading.</p>
           </section>
           <p class="note">${icon('info')}<span class="note-text"></span></p>`;
 
@@ -2741,6 +4113,17 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
         ui.note = el.querySelector('.note-text');
         ui.chartTitle = el.querySelector('.chart-title');
         ui.chartSub = el.querySelector('.chart-sub');
+        ui.clearLine = el.querySelector('.clear-line');
+        ui.alCard = el.querySelector('.al-card');
+        ui.alSub = el.querySelector('.al-sub');
+        ui.alRows = el.querySelector('.al-rows');
+        ui.radarSum = el.querySelector('.radar-sum');
+        ui.seaSub = el.querySelector('.sea-sub');
+        ui.sea = {};
+        el.querySelectorAll('.sea-tile').forEach((t) => { ui.sea[t.dataset.k] = { el: t, num: t.querySelector('.num'), sub: t.querySelector('.th'), mini: t.querySelector('.mini-wrap'), sig: null }; });
+        ui.obsCard = el.querySelector('.obs-card');
+        ui.obsSub = el.querySelector('.obs-sub');
+        ui.obsRows = el.querySelector('.obs-rows');
 
         const nightShade = {
           id: 'nightShade',
@@ -2818,6 +4201,10 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
 
         syncModeUI(ctx);
         render(ctx, display ?? ctx.state.hour, true);
+        renderAlerts(ctx);
+        renderSea(ctx);
+        renderObsCard(ctx);
+        renderRadarSummary(ctx);
       },
 
       legend(ctx) {
@@ -2829,7 +4216,11 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
           : `<div class="lg-title">Temperature${lv ? ' · NWS' : ''}</div><div class="lg-ramp"></div><div class="lg-ticks mono"><span>60°</span><span>76°</span><span>98°</span></div>`;
         const fog = s.fog ? `<div class="lg-row"><i class="sw fog"></i>${lv ? 'Coastal cloud (NWS)' : 'Marine layer'}</div>` : '';
         const missing = lv && live && live.missing.length ? '<div class="lg-row"><i class="sw nodata"></i>— no live data</div>' : '';
-        return ramp + fog + missing;
+        const sat = s.sat ? '<div class="lg-row"><i class="sw sat"></i>Satellite cloud · GOES-West</div>' : '';
+        const obs = s.obs ? '<div class="lg-row"><i class="sw obs"></i>Station reading · ± vs forecast</div>' : '';
+        const radar = s.radar ? '<div class="lg-row"><i class="sw radar"></i>Rain radar · NEXRAD</div>' : '';
+        const wind = s.wind && lv ? '<div class="lg-row"><i class="sw wind"></i>Wind · arrow = where the air heads</div>' : '';
+        return ramp + fog + sat + radar + obs + wind + missing;
       },
     };
   })();
@@ -2867,6 +4258,8 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
     let openTimer = null;
     let radiusRaf = 0;
     let targets = [];
+    let crawlSig = '';
+    let sharedFlown = false;
     let introUntil = 0;
     let locating = false;
 
@@ -2901,9 +4294,10 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       el.classList.toggle('is-selected', pin.selected);
       el.classList.toggle('is-target', pin.target);
       el.style.setProperty('--d', pin.d || '0ms');
+      if (pin.soon) el.dataset.soon = pin.soon; else delete el.dataset.soon;
       if (performance.now() > introUntil) el.style.setProperty('--i', '0');
       host.setAttribute('role', 'button');
-      host.setAttribute('aria-label', `${pin.p.type === 'brewery' ? 'Brewery' : 'Taco shop'}: ${pin.p.name}`);
+      host.setAttribute('aria-label', `${pin.p.type === 'brewery' ? 'Brewery' : 'Taco shop'}: ${pin.p.name}${pin.soon === 'closing' ? ', closing soon' : pin.soon === 'opening' ? ', opening soon' : ''}`);
     }
 
     function pinOut(pin) { // move from cluster to the always-visible group
@@ -3083,24 +4477,68 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       targets = [];
     }
 
+    // Closing / opening within 45 min -> a small badge on the pin. Cheap: ~365 parsed-hours lookups a minute.
+    function refreshSoon() {
+      const now = new Date();
+      for (const pin of pins.values()) {
+        const st = SDX.crawl.status(pin.p.hours, now);
+        const v = st.soon ? (st.state === 'open' ? 'closing' : 'opening') : '';
+        if ((pin.soon || '') !== v) { pin.soon = v; paintPin(pin); }
+      }
+    }
+
+    const whenStr = (at, now) => `${SDX.time.dayKey(at) !== SDX.time.dayKey(now) ? at.toLocaleDateString([], { ...TZ_OPTS, weekday: 'short' }) + ' ' : ''}${fmtClockPT(at)}`;
+    // One line about a stop on the day's crawl: will it be open when you get there?
+    function arrivalLine(a, now = new Date()) {
+      if (a.open === null) return { cls: 'unk', text: 'Hours unknown' };
+      if (a.open === false) return { cls: 'closed', text: a.opensAt ? `Closed when you arrive · opens ${whenStr(a.opensAt, now)}` : 'Closed when you arrive' };
+      if (a.closesInMin == null) return { cls: 'open', text: 'Open 24/7' };
+      const closeAt = new Date(a.arrivesAt.getTime() + a.closesInMin * 60e3);
+      return a.tight
+        ? { cls: 'warn', text: `Closes ${a.closesInMin} min after you arrive (${fmtClockPT(closeAt)})` }
+        : { cls: 'open', text: `Open when you arrive · closes ${whenStr(closeAt, now)}` };
+    }
+    const crawlSigOf = (arr) => arr.map((a) => `${a.poi.id}:${a.open}:${a.tight}`).join('|');
+
+    // Once a minute: pin badges, the open count, and (without redrawing the route) the crawl's arrival checks.
+    function refreshClock(ctx) {
+      refreshSoon();
+      renderOpenLine(ctx);
+      const s = ctx.state;
+      if (!s.selected) return;
+      const arr = SDX.crawl.arrival(targets, new Date());
+      if (crawlSigOf(arr) !== crawlSig) drawCrawl(ctx, originOf(ctx, s.selected), { fly: false });
+      else { targets = arr; renderCrawlCard(ctx); }
+    }
+
+    function renderOpenLine(ctx) {
+      const ui = ctx.ui;
+      if (!ui.openN) return;
+      const c = SDX.crawl.countOpen(visible(ctx), new Date());
+      tweenNumber(ui.openN, c.open);
+      ui.openRest.textContent = `of ${c.total} · ${c.closed} closed · ${c.unknown} hours unknown`;
+    }
+
     function drawCrawl(ctx, b, { fly = true } = {}) {
       clearCrawl();
       if (!b) return;
       const radius = ctx.state.radiusMi;
-      const res = SDX.crawl.nearestTacos(b, visible(ctx), { max: 3, radiusMi: radius });
+      const res = SDX.crawl.arrival(SDX.crawl.nearestTacos(b, visible(ctx), { max: 3, radiusMi: radius }), new Date());
       targets = res;
+      crawlSig = crawlSigOf(res);
       const bp = pins.get(b.id);
       if (bp) { bp.selected = true; pinOut(bp); paintPin(bp); }
       res.forEach((r, i) => {
         const line = L.polyline([[b.lat, b.lon], [r.poi.lat, r.poi.lon]], {
-          className: 'crawl-line', color: '#f2b53a', weight: 3, opacity: 1, interactive: false,
+          className: 'crawl-line', color: r.open === false ? '#e5484d' : r.tight ? '#e8a21a' : '#f2b53a', weight: 3, opacity: 1, interactive: false,
         }).addTo(crawlGroup);
+        const flag = r.open === false ? '<em class="bad">closed by then</em>' : r.tight ? `<em class="warn">closes ${r.closesInMin} min after</em>` : '';
         // Label sits beside the taco pin (not the line midpoint) so tight clusters stay legible,
         // on the side facing away from the start so it never covers it.
         const east = r.poi.lon >= b.lon;
         L.tooltip({ permanent: true, direction: east ? 'right' : 'left', offset: [east ? 20 : -20, 0], className: 'crawl-tip', opacity: 1, interactive: false })
           .setLatLng([r.poi.lat, r.poi.lon])
-          .setContent(`<span class="ct" style="--d:${i}"><i class="ci">${i + 1}</i><b>${fmtMi(r.miles)}</b> · ${r.minutes} min walk</span>`)
+          .setContent(`<span class="ct${r.open === false ? ' is-closed' : ''}" style="--d:${i}"><i class="ci">${i + 1}</i><b>${fmtMi(r.miles)}</b> · ${r.minutes} min walk${flag}</span>`)
           .addTo(crawlGroup);
         animateDraw(line.getElement(), i);
         const tp = pins.get(r.poi.id);
@@ -3177,6 +4615,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       }
       renderNearCard(ctx);
       renderCrawlCard(ctx);
+      renderOpenLine(ctx);
     }
 
     function renderNearCard(ctx) {
@@ -3225,11 +4664,14 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
           <div class="steps">${targets.length ? targets.map((t, i) => `
             <button type="button" class="step" data-id="${t.poi.id}" style="animation-delay:${i * 70}ms">
               <span class="n mono">${i + 1}</span>
-              <span class="min-w-0"><span class="t block truncate">${esc(t.poi.name)}</span><span class="m">${SDX.tags.activeLabels(t.poi).join(' · ') || 'Taco shop'}</span></span>
+              <span class="min-w-0"><span class="t block truncate">${esc(t.poi.name)}</span><span class="m ${arrivalLine(t).cls}">${esc(arrivalLine(t).text)}</span></span>
               <span class="w mono">${fmtMi(t.miles)} · ${t.minutes}m</span>
             </button>`).join('') : `<div class="muted">No taco shops within ${r} with the current filters.</div>`}
           </div>
-          ${targets.length ? `<div class="sub" style="margin-top:8px">One-way walks at ~${SDX.geo.WALK_MPH} mph with a street-grid factor · ${total} min if you visit each and return.</div>` : ''}`;
+          ${targets.length ? `<div class="crawl-sum"><span class="pill"><b>${targets.length}</b> stop${targets.length > 1 ? 's' : ''}</span><span class="pill"><b>${total}</b> min walking there &amp; back</span><span class="pill">setting off <b>${fmtClockPT(new Date())}</b></span></div>` : ''}
+          ${targets.some((t) => t.open === false) ? `<div class="crawl-warn">${icon('triangle-alert')}<span>${targets.filter((t) => t.open === false).length === 1 ? 'One stop is' : `${targets.filter((t) => t.open === false).length} stops are`} closed by the time you'd get there. Those routes are drawn in red.</span></div>` : ''}
+          ${targets.some((t) => t.tight) ? `<div class="crawl-warn tight">${icon('clock')}<span>${targets.filter((t) => t.tight).length === 1 ? 'One stop closes' : 'Some stops close'} within 30 minutes of your arrival. Go there first.</span></div>` : ''}
+          ${targets.length ? `<div class="sub" style="margin-top:8px">One-way walks at ~${SDX.geo.WALK_MPH} mph with a street-grid factor. Opening hours from OpenStreetMap; stops with no hours listed are not judged.</div>` : ''}`;
         box.querySelector('.clear').addEventListener('click', () => ctx.setState({ selected: null }));
         box.querySelectorAll('.step').forEach((btn) => btn.addEventListener('click', () => {
           const p = byId.get(btn.dataset.id);
@@ -3253,9 +4695,19 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       icon: 'beer',
       accent: '#f2b53a',
 
-      createState: () => ({
-        filters: { crawlable: false, hazyIPA: false, open247: false, bajaFish: false, openNow: false, near: false },
-        crawl: true, selected: null, hood: 'all', radiusMi: SDX.crawl.RADIUS_MI, nearMi: 3, me: null, view: 'pins',
+      createState: () => {
+        const u = urlFor('hotspots');
+        const on = new Set(u.filters || []);
+        const sel = u.sel && byId.get(u.sel) && byId.get(u.sel).type === 'brewery' ? u.sel : null;
+        return {
+          filters: { crawlable: on.has('crawlable'), hazyIPA: on.has('hazyIPA'), open247: on.has('open247'), bajaFish: on.has('bajaFish'), openNow: on.has('openNow'), near: false },
+          crawl: true, selected: sel, hood: u.hood && HOODS.has(u.hood) ? u.hood : 'all', radiusMi: u.radiusMi ?? SDX.crawl.RADIUS_MI, nearMi: 3, me: null, view: u.view || 'pins',
+        };
+      },
+      urlState: (ctx) => ({
+        hood: ctx.state.hood, radiusMi: ctx.state.radiusMi, view: ctx.state.view,
+        filters: Object.keys(ctx.state.filters).filter((k) => ctx.state.filters[k]),
+        sel: ctx.state.selected && ctx.state.selected !== ME ? ctx.state.selected : undefined,
       }),
       bounds: () => L.latLngBounds(LM.map((p) => [p.lat, p.lon])),
 
@@ -3278,7 +4730,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
             keyboard: true, riseOnHover: true, poiType: p.type,
             icon: L.divIcon({
               className: 'sdx-icon', iconSize: [0, 0], iconAnchor: [0, 0],
-              html: `<div class="sdx-anchor"><div class="sdx-pin ${p.type}" style="--i:${Math.min(rank, 32)}"><span class="glyph" aria-hidden="true">${p.type === 'brewery' ? '🍺' : '🌮'}</span></div></div>`,
+              html: `<div class="sdx-anchor"><div class="sdx-pin ${p.type}" style="--i:${Math.min(rank, 32)}"><span class="glyph" aria-hidden="true">${p.type === 'brewery' ? '🍺' : '🌮'}</span><i class="soon" aria-hidden="true"></i></div></div>`,
             }),
           });
           const pin = { p, m, shown: false, pinned: false, dim: false, selected: false, target: false, d: '' };
@@ -3296,21 +4748,32 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
         map.on('click', onMapClick);
         // Open Now depends on the clock: re-check every minute while it's on.
         openTimer = setInterval(() => {
-          if (!ctx.state.filters.openNow) return;
-          applyVisibility(ctx);
-          if (ctx.state.selected) drawCrawl(ctx, originOf(ctx, ctx.state.selected), { fly: false });
-          updateStats(ctx);
+          if (ctx.state.filters.openNow) {
+            applyVisibility(ctx);
+            if (ctx.state.selected) drawCrawl(ctx, originOf(ctx, ctx.state.selected), { fly: false });
+            updateStats(ctx);
+          }
+          refreshClock(ctx);
         }, 60e3);
         applyVisibility(ctx);
+        refreshSoon();
+        renderOpenLine(ctx);
         syncView(ctx);
         syncMe(ctx);
-        if (ctx.state.selected) drawCrawl(ctx, originOf(ctx, ctx.state.selected), { fly: false });
+        // A shared link that carries a crawl flies straight to its route (once); a normal re-activation doesn't.
+        const flyToShared = !!urlFor('hotspots').sel && !sharedFlown;
+        sharedFlown = true;
+        if (ctx.state.selected) drawCrawl(ctx, originOf(ctx, ctx.state.selected), { fly: flyToShared });
       },
+
+      // Only the focused layer shows anything on the map: fade Tacos & Brews out when Microclimates takes over.
+      onFocus(ctx) { ctx.map.getContainer().classList.remove('hs-off'); },
+      onBlur(ctx) { ctx.map.closePopup(); ctx.map.getContainer().classList.add('hs-off'); },
 
       onDeactivate(ctx) {
         ctx.map.off('click', onMapClick);
         ctx.map.closePopup();
-        ctx.map.getContainer().classList.remove('hs-heat');
+        ctx.map.getContainer().classList.remove('hs-heat', 'hs-off');
         clearInterval(openTimer);
         cancelAnimationFrame(radiusRaf);
         pins = new Map();
@@ -3351,6 +4814,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
             <span class="eyebrow">Filters</span>
             <span class="muted"><b class="mono vis-count" style="color:var(--text)">${visible(ctx).length}</b> / ${LM.length} spots</span>
           </div>
+          <div class="open-line"><i aria-hidden="true"></i><span><b class="mono open-n">0</b> open now <span class="rest open-rest"></span></span></div>
           <div class="fchips">${FILTERS.map((f) => `
             <label class="fchip" data-chip="${f.key}">
               <input type="checkbox" data-key="${f.key}" ${s.filters[f.key] ? 'checked' : ''}>
@@ -3380,6 +4844,8 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
           </div>`;
         const ui = ctx.ui;
         ui.visCount = el.querySelector('.vis-count');
+        ui.openN = el.querySelector('.open-n');
+        ui.openRest = el.querySelector('.open-rest');
         ui.visCount._v = visible(ctx).length;
         ui.crawlSwitch = el.querySelector('.switch');
         ui.crawlHint = el.querySelector('.crawl-hint-txt');
@@ -3502,6 +4968,7 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
       },
 
       legend(ctx) {
+        if (!ctx.isFocused()) return '';
         const s = ctx.state;
         const rows = s.view === 'heat'
           ? '<div class="lg-ramp heat"></div><div class="lg-ticks mono"><span>fewer</span><span>denser</span></div>'
@@ -3522,6 +4989,11 @@ path.near-ring { animation: sdx-ants 3s linear infinite; }
 
   const app = new App();
   app.boot();
+
+  // Installable + quick to reopen. Caches only the shell and CDN libraries, never live data.
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch((err) => console.warn('[SDX] service worker not registered', err)));
+  }
   window.SDXApp = app; // handy for debugging in the console
 
   // ==================================================================

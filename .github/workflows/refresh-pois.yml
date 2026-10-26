@@ -1,0 +1,43 @@
+name: Refresh OSM spots
+
+# Monthly: re-pull San Diego County breweries and taco shops from OpenStreetMap and open a PR
+# with the diff. It never pushes to main. scripts/fetch-pois.mjs exits non-zero (so this run
+# fails and GitHub notifies you) if Overpass errors or returns suspiciously little data.
+on:
+  schedule:
+    - cron: '17 9 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/fetch-pois.mjs
+      - run: npm test
+      - run: npm run lint
+      - name: Open a pull request if the data changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet -- src/index.html; then
+            echo "OpenStreetMap data is unchanged; nothing to do."
+            exit 0
+          fi
+          BRANCH="data/osm-refresh-$(date -u +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add src/index.html
+          git commit -m "Refresh taco/brewery data from OpenStreetMap"
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" \
+            --title "Refresh taco/brewery data from OpenStreetMap" \
+            --body "Automated monthly pull from Overpass (data © OpenStreetMap contributors, ODbL). Tests and lint passed on this exact data. Review the diff, then merge to deploy."

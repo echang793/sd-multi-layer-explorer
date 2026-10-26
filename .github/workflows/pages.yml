@@ -3,6 +3,8 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -11,11 +13,26 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Nothing ships unless the tests and lint pass (the second test run uses another timezone,
+  # because everything time-of-day must stay on San Diego time).
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+      - run: TZ=Asia/Tokyo npm test
+      - run: npm run lint
+
   deploy:
+    if: github.event_name != 'pull_request'
+    needs: test
     runs-on: ubuntu-latest
     environment:
       name: github-pages

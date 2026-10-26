@@ -553,3 +553,418 @@ test('nws: validateGridpoint fails loudly on missing or empty series', () => {
   assert.throws(() => SDX.nws.validateGridpoint({ properties: { temperature: series(0), relativeHumidity: series(3), skyCover: series(3) } }), /temperature/);
   assert.throws(() => SDX.nws.validateGridpoint(null), /gridpoint/i);
 });
+
+// ================================================================ live sky & sea (batch 1)
+test('math: lerpAngle takes the short way around the compass', () => {
+  const { lerpAngle } = SDX.math;
+  assert.equal(lerpAngle(350, 10, 0.5), 0);
+  assert.equal(lerpAngle(10, 350, 0.5), 0);
+  assert.equal(lerpAngle(90, 180, 0.5), 135);
+  assert.equal(lerpAngle(90, 180, 0), 90);
+  assert.equal(lerpAngle(90, 180, 1), 180);
+  assert.ok(lerpAngle(359, 1, 0.25) >= 0 && lerpAngle(359, 1, 0.25) < 360);
+});
+
+test('nws: kmhToMph converts and guards non-numbers', () => {
+  assert.equal(SDX.nws.kmhToMph(16.09344), 10);
+  assert.equal(SDX.nws.kmhToMph(null), null);
+  assert.equal(SDX.nws.kmhToMph(NaN), null);
+});
+
+test('nws: clearingHour finds when the coastal cloud deck breaks and returns', () => {
+  const sky = Array(24).fill(null);
+  [[6, 95], [7, 95], [8, 90], [9, 80], [10, 62], [11, 38], [12, 20], [13, 15], [14, 15], [15, 20], [16, 30], [17, 45], [18, 60], [19, 80], [20, 90], [21, 90], [22, 90], [23, 90]]
+    .forEach(([h, v]) => { sky[h] = v; });
+  const r = SDX.nws.clearingHour(sky);
+  assert.equal(r.state, 'clearing');
+  // 62 -> 38 crosses 50 halfway between 10:00 and 11:00
+  assert.ok(Math.abs(r.at - 10.5) < 0.01, `at=${r.at}`);
+  // 45 -> 60 crosses 50 a third of the way from 17:00 to 18:00
+  assert.ok(Math.abs(r.returnAt - (17 + 1 / 3)) < 0.01, `returnAt=${r.returnAt}`);
+});
+
+test('nws: clearingHour covers clear, cloudy-all-day and thin data', () => {
+  const flat = (v) => Array.from({ length: 24 }, () => v);
+  assert.equal(SDX.nws.clearingHour(flat(10)).state, 'clear');
+  assert.equal(SDX.nws.clearingHour(flat(90)).state, 'cloudy');
+  const sparse = Array(24).fill(null); sparse[8] = 90; sparse[9] = 20;
+  assert.equal(SDX.nws.clearingHour(sparse).state, 'unknown');
+  assert.equal(SDX.nws.clearingHour([]).state, 'unknown');
+  assert.equal(SDX.nws.clearingHour(null).state, 'unknown');
+});
+
+const KSAN_OBS = {
+  properties: {
+    timestamp: '2026-10-06T05:50:00+00:00', textDescription: 'Mostly Clear',
+    temperature: { unitCode: 'wmoUnit:degC', value: 27 },
+    relativeHumidity: { unitCode: 'wmoUnit:percent', value: 50.986771578907 },
+    windSpeed: { unitCode: 'wmoUnit:km_h-1', value: 5.544 },
+    windDirection: { unitCode: 'wmoUnit:degree_(angle)', value: 320 },
+  },
+};
+
+test('obs: stations are real SD airports with valid coords', () => {
+  const { STATIONS } = SDX.obs;
+  assert.ok(STATIONS.length >= 8);
+  assert.ok(STATIONS.some((s) => s.id === 'KSAN'));
+  for (const s of STATIONS) {
+    assert.match(s.id, /^K[A-Z]{3}$/);
+    assert.ok(inBBox(s), `${s.id} outside the county`);
+  }
+  assert.equal(new Set(STATIONS.map((s) => s.id)).size, STATIONS.length);
+});
+
+test('obs: parse converts units and reports age', () => {
+  const now = Date.parse('2026-10-06T06:20:00Z');
+  const o = SDX.obs.parse(KSAN_OBS, now);
+  assert.equal(o.tF, 80.6);
+  assert.equal(Math.round(o.rh), 51);
+  assert.equal(o.windMph, 3.4);
+  assert.equal(o.windFromDeg, 320);
+  assert.equal(o.desc, 'Mostly Clear');
+  assert.equal(o.ageMin, 30);
+});
+
+test('obs: parse fails loudly on junk and tolerates one missing field', () => {
+  assert.throws(() => SDX.obs.parse(null, 0), /observation/i);
+  assert.throws(() => SDX.obs.parse({ properties: {} }, 0), /observation/i);
+  const noTemp = JSON.parse(JSON.stringify(KSAN_OBS));
+  noTemp.properties.temperature.value = null;
+  assert.throws(() => SDX.obs.parse(noTemp, Date.parse('2026-10-06T06:00:00Z')), /temperature/i);
+  const noWind = JSON.parse(JSON.stringify(KSAN_OBS));
+  noWind.properties.windSpeed.value = null;
+  const o = SDX.obs.parse(noWind, Date.parse('2026-10-06T06:00:00Z'));
+  assert.equal(o.windMph, null);
+  assert.equal(o.tF, 80.6);
+});
+
+test('obs: delta is observed minus forecast, rounded, null-safe', () => {
+  assert.equal(SDX.obs.delta(70, 73.4), 3);
+  assert.equal(SDX.obs.delta(70, 66.6), -3);
+  assert.equal(SDX.obs.delta(null, 70), null);
+  assert.equal(SDX.obs.delta(70, NaN), null);
+});
+
+test('obs: nearest station honors the distance cap', () => {
+  const near = SDX.obs.nearest(32.75, -117.2, 5);
+  assert.equal(near.id, 'KSAN');
+  assert.equal(SDX.obs.nearest(32.0, -118.0, 5), null);
+});
+
+test('alerts: relevant keeps weather that matters, drops expired, sorts by severity', () => {
+  const now = Date.parse('2026-10-06T06:00:00-07:00');
+  const f = (id, event, severity, expires) => ({ properties: { id, event, severity, expires, headline: `${event} issued`, areaDesc: 'San Diego County Coastal Areas', onset: null, ends: expires } });
+  const json = { features: [
+    f('a', 'Beach Hazards Statement', 'Moderate', '2026-10-09T23:00:00-07:00'),
+    f('b', 'Extreme Heat Warning', 'Severe', '2026-10-08T20:00:00-07:00'),
+    f('c', 'Special Marine Warning', 'Minor', '2026-10-09T23:00:00-07:00'),
+    f('d', 'Dense Fog Advisory', 'Minor', '2026-10-05T09:00:00-07:00'),
+    f('e', 'Coastal Flood Advisory', 'Minor', '2026-10-09T11:00:00-07:00'),
+  ] };
+  const out = SDX.alerts.relevant(json, now);
+  assert.deepEqual(Array.from(out, (a) => a.id), ['b', 'a', 'e']);
+  assert.equal(out[0].event, 'Extreme Heat Warning');
+  assert.equal(out[0].level, 3);
+});
+
+test('alerts: malformed payload throws, empty is fine, merge dedupes by id', () => {
+  assert.throws(() => SDX.alerts.relevant({}, 0), /alerts/i);
+  assert.throws(() => SDX.alerts.relevant(null, 0), /alerts/i);
+  assert.deepEqual(Array.from(SDX.alerts.relevant({ features: [] }, 0)), []);
+  const a = { id: 'x', level: 2 };
+  const b = { id: 'x', level: 2 };
+  const c = { id: 'y', level: 3 };
+  assert.deepEqual(Array.from(SDX.alerts.merge([[a], [b, c]]), (x) => x.id), ['y', 'x']);
+});
+
+test('marine: CO-OPS water temperature parses the latest reading and a 24h series', () => {
+  const json = { metadata: { id: '9410230', name: 'La Jolla' }, data: [
+    { t: '2026-10-05 06:18', v: '72.5', f: '0,0,0' }, { t: '2026-10-05 06:24', v: '72.5', f: '0,0,0' },
+    { t: '2026-10-06 06:00', v: '71.8', f: '0,0,0' }, { t: '2026-10-06 06:06', v: '71.6', f: '0,0,0' },
+  ] };
+  const r = SDX.marine.parseCoops(json);
+  assert.equal(r.tF, 71.6);
+  assert.equal(r.at, Date.parse('2026-10-06T06:06:00Z'));
+  assert.equal(r.series.length, 4);
+  assert.throws(() => SDX.marine.parseCoops({ error: { message: 'No data' } }), /water/i);
+  assert.throws(() => SDX.marine.parseCoops({ data: [{ t: 'x', v: '' }] }), /water/i);
+});
+
+test('marine: Open-Meteo marine parses waves and sea temperature', () => {
+  const json = {
+    current: { time: '2026-10-06T06:00', wave_height: 3.018, wave_period: 10.15, sea_surface_temperature: 73.6 },
+    hourly: { time: ['2026-10-06T04:00', '2026-10-06T05:00', '2026-10-06T06:00'], wave_height: [3.1, 3.08, 3.0], sea_surface_temperature: [73.9, 73.8, null] },
+  };
+  const r = SDX.marine.parseOpenMeteo(json);
+  assert.equal(r.waveFt, 3);
+  assert.equal(r.periodS, 10.2);
+  assert.equal(r.sstF, 73.6);
+  assert.deepEqual(Array.from(r.waveSeries), [3.1, 3.08, 3.0]);
+  assert.throws(() => SDX.marine.parseOpenMeteo({}), /marine/i);
+  assert.throws(() => SDX.marine.parseOpenMeteo({ current: { wave_height: NaN } }), /marine/i);
+});
+
+test('air: parse and AQI categories follow the EPA bands', () => {
+  const json = { current: { time: '2026-10-06T06:00', us_aqi: 66, pm2_5: 17.0 }, hourly: { time: ['a', 'b'], us_aqi: [69, 66] } };
+  const r = SDX.air.parse(json);
+  assert.equal(r.aqi, 66);
+  assert.equal(r.pm25, 17);
+  assert.deepEqual(Array.from(r.series), [69, 66]);
+  assert.throws(() => SDX.air.parse({ current: {} }), /air/i);
+  const cat = SDX.air.category;
+  assert.equal(cat(30).label, 'Good');
+  assert.equal(cat(66).label, 'Moderate');
+  assert.equal(cat(120).label, 'Unhealthy for sensitive groups');
+  assert.equal(cat(180).label, 'Unhealthy');
+  assert.equal(cat(250).label, 'Very unhealthy');
+  assert.equal(cat(400).label, 'Hazardous');
+  assert.equal(cat(NaN), null);
+});
+
+test('sat: GIBS capabilities default time is extracted, junk throws', () => {
+  const xml = '<Dimension><ows:Identifier>Time</ows:Identifier><Default>2026-10-06T05:20:00Z</Default><Current>false</Current></Dimension>';
+  assert.equal(SDX.sat.parseDefaultTime(xml), '2026-10-06T05:20:00Z');
+  assert.throws(() => SDX.sat.parseDefaultTime('<xml/>'), /satellite/i);
+});
+
+test('sat: frames step back from the newest in 10-minute multiples, oldest first', () => {
+  const f = SDX.sat.frames('2026-10-06T05:20:00Z', 5, 60);
+  assert.deepEqual(Array.from(f), ['2026-10-06T01:20:00Z', '2026-10-06T02:20:00Z', '2026-10-06T03:20:00Z', '2026-10-06T04:20:00Z', '2026-10-06T05:20:00Z']);
+  assert.throws(() => SDX.sat.frames('nope', 3, 60), /satellite/i);
+  assert.throws(() => SDX.sat.frames('2026-10-06T05:20:00Z', 3, 7), /satellite/i);
+});
+
+test('sat: age is minutes behind now, tile math lands over San Diego', () => {
+  assert.equal(SDX.sat.ageMin('2026-10-06T05:20:00Z', Date.parse('2026-10-06T06:14:00Z')), 54);
+  const t = SDX.sat.tileXY(32.8, -117.1, 6);
+  assert.equal(t.x, 11);
+  assert.ok(t.y >= 25 && t.y <= 27, `y=${t.y}`);
+  assert.match(SDX.sat.tileUrl('2026-10-06T05:20:00Z', 6, 11, 26), /GOES-West_ABI_GeoColor\/default\/2026-10-06T05:20:00Z\/GoogleMapsCompatible_Level7\/6\/26\/11\.png$/);
+});
+
+test('alerts: group folds the same warning issued per zone into one entry with every area', () => {
+  const mk = (id, event, ends, areaDesc, level = 3) => ({ id, event, ends, areaDesc, level });
+  const out = SDX.alerts.group([
+    mk('1', 'Extreme Heat Warning', '2026-10-08T20:00:00-07:00', 'San Diego County Coastal Areas'),
+    mk('2', 'Extreme Heat Warning', '2026-10-08T20:00:00-07:00', 'San Diego County Inland Valleys'),
+    mk('3', 'Extreme Heat Warning', '2026-10-09T08:00:00-07:00', 'San Diego County Mountains'),
+    mk('4', 'Beach Hazards Statement', '2026-10-09T23:00:00-07:00', 'San Diego County Coastal Areas', 2),
+  ]);
+  assert.equal(out.length, 3);
+  assert.equal(out[0].event, 'Extreme Heat Warning');
+  assert.equal(out[0].areaDesc, 'San Diego County Coastal Areas; San Diego County Inland Valleys');
+  assert.deepEqual(Array.from(out[0].ids), ['1', '2']);
+  assert.equal(out[1].areaDesc, 'San Diego County Mountains');
+  // duplicate area names are not repeated
+  const dup = SDX.alerts.group([mk('a', 'Wind Advisory', 'x', 'Coast'), mk('b', 'Wind Advisory', 'x', 'Coast')]);
+  assert.equal(dup[0].areaDesc, 'Coast');
+  assert.deepEqual(Array.from(SDX.alerts.group([])), []);
+});
+
+// ================================================================ smarter crawls (batch 2)
+const stop = (hours, minutes = 10, name = 'Taqueria') => ({ poi: { id: name, name, hours }, miles: 0.5, minutes });
+const TUE_9 = 'Mo-Su 11:00-21:00';
+
+test('crawl: arrival adds the walk to the start time and checks the stop is open then', () => {
+  const [a] = SDX.crawl.arrival([stop(TUE_9, 10)], at(2026, 10, 6, 18, 0));
+  assert.equal(a.arrivesAt.getTime(), at(2026, 10, 6, 18, 10).getTime());
+  assert.equal(a.open, true);
+  assert.equal(a.closesInMin, 170);
+  assert.equal(a.tight, false);
+});
+
+test('crawl: arrival flags stops that close before you get there', () => {
+  const [a] = SDX.crawl.arrival([stop(TUE_9, 10)], at(2026, 10, 6, 20, 55));
+  assert.equal(a.open, false);
+  assert.equal(a.opensAt.getTime(), at(2026, 10, 7, 11, 0).getTime());
+  assert.equal(a.tight, false);
+  assert.equal(a.closesInMin, null);
+});
+
+test('crawl: arrival marks a stop that closes within 30 minutes of arriving as tight', () => {
+  const [a] = SDX.crawl.arrival([stop(TUE_9, 10)], at(2026, 10, 6, 20, 40));
+  assert.equal(a.open, true);
+  assert.equal(a.closesInMin, 10);
+  assert.equal(a.tight, true);
+});
+
+test('crawl: arrival copes with unknown hours, 24/7 and closing after midnight', () => {
+  const out = SDX.crawl.arrival([stop('', 5, 'u'), stop('24/7', 5, 'a'), stop('Mo-Su 12:00-01:00', 20, 'm')], at(2026, 10, 6, 23, 50));
+  assert.equal(out[0].open, null);
+  assert.equal(out[0].closesInMin, null);
+  assert.equal(out[0].tight, false);
+  assert.equal(out[1].open, true);
+  assert.equal(out[1].closesInMin, null);
+  assert.equal(out[2].open, true);
+  assert.equal(out[2].closesInMin, 50);
+});
+
+test('crawl: arrival does not mutate or lose the nearestTacos fields', () => {
+  const t = stop(TUE_9, 7);
+  const [a] = SDX.crawl.arrival([t], at(2026, 10, 6, 12, 0));
+  assert.equal(a.poi, t.poi);
+  assert.equal(a.minutes, 7);
+  assert.equal(a.miles, 0.5);
+  assert.deepEqual(Object.keys(t).sort(), ['miles', 'minutes', 'poi']);
+});
+
+test('crawl: status says open/closed/unknown and whether the change is soon', () => {
+  const S = SDX.crawl.status;
+  const closingSoon = S(TUE_9, at(2026, 10, 6, 20, 30));
+  assert.equal(closingSoon.state, 'open');
+  assert.equal(closingSoon.minutes, 30);
+  assert.equal(closingSoon.soon, true);
+  const opensSoon = S(TUE_9, at(2026, 10, 6, 10, 40));
+  assert.equal(opensSoon.state, 'closed');
+  assert.equal(opensSoon.minutes, 20);
+  assert.equal(opensSoon.soon, true);
+  assert.equal(S(TUE_9, at(2026, 10, 6, 13, 0)).soon, false);
+  assert.equal(S(TUE_9, at(2026, 10, 6, 5, 0)).soon, false);
+  assert.equal(S('', at(2026, 10, 6, 13, 0)).state, 'unknown');
+  assert.equal(S('24/7', at(2026, 10, 6, 13, 0)).state, 'open');
+  assert.equal(S('24/7', at(2026, 10, 6, 13, 0)).minutes, null);
+});
+
+test('crawl: countOpen tallies known-open spots against all', () => {
+  const pois = [{ hours: TUE_9 }, { hours: TUE_9 }, { hours: '' }, { hours: 'Mo-Su 06:00-08:00' }];
+  const c = SDX.crawl.countOpen(pois, at(2026, 10, 6, 12, 0));
+  assert.deepEqual({ open: c.open, closed: c.closed, unknown: c.unknown, total: c.total }, { open: 2, closed: 1, unknown: 1, total: 4 });
+});
+
+// ================================================================ shareable URL state (batch 3)
+const J = (x) => JSON.parse(JSON.stringify(x));
+
+test('urlstate: defaults encode to nothing', () => {
+  assert.equal(SDX.urlstate.encode({}), '');
+  assert.equal(SDX.urlstate.encode({ tab: 'microclimates', source: 'sim', metric: 'temp', hood: 'all', radiusMi: 1.5, view: 'pins', filters: [], layers: [] }), '');
+});
+
+test('urlstate: encode writes a stable, compact string', () => {
+  const s = SDX.urlstate.encode({ tab: 'hotspots', hood: 'pacific-beach', filters: ['crawlable', 'openNow'], radiusMi: 2, view: 'heat', sel: 'b-n123' });
+  assert.equal(s, 't=hotspots&a=pacific-beach&f=crawlable,openNow&r=2&v=heat&s=b-n123');
+  const m = SDX.urlstate.encode({ tab: 'microclimates', hour: 14.5, source: 'live', metric: 'rh', layers: ['sat', 'wind'] });
+  assert.equal(m, 'h=14.5&src=live&m=rh&l=sat,wind');
+});
+
+test('urlstate: decode round-trips what encode wrote', () => {
+  const state = { tab: 'hotspots', hood: 'ocean-beach', filters: ['hazyIPA', 'open247'], radiusMi: 0.75, view: 'heat', sel: 'b-n1' };
+  assert.deepEqual(J(SDX.urlstate.decode(SDX.urlstate.encode(state))), state);
+  const micro = { hour: 9.25, source: 'live', metric: 'rh', layers: ['obs'] }; // microclimates is the default tab
+  assert.deepEqual(J(SDX.urlstate.decode(SDX.urlstate.encode(micro))), micro);
+});
+
+test('urlstate: decode clamps numbers and snaps them to the controls\' steps', () => {
+  const d = (q) => J(SDX.urlstate.decode(q));
+  assert.equal(d('r=9').radiusMi, 3);
+  assert.equal(d('r=0.1').radiusMi, 0.5);
+  assert.equal(d('r=1.33').radiusMi, 1.25);
+  assert.equal(d('h=3').hour, 6);
+  assert.equal(d('h=99').hour, 22);
+  assert.equal(d('h=10.1').hour, 10);
+  assert.equal(d('h=abc').hour, undefined);
+  assert.equal(d('r=NaN').radiusMi, undefined);
+  assert.equal(d('r=Infinity').radiusMi, undefined);
+});
+
+test('urlstate: decode ignores unknown keys, filters, layers and values', () => {
+  const d = SDX.urlstate.decode('f=hacker,openNow,near&l=sat,zzz,wind&src=evil&m=rh&v=cube&t=Nope!&x=1&near=yes');
+  assert.deepEqual(J(d), { filters: ['openNow'], layers: ['sat', 'wind'], metric: 'rh' });
+});
+
+test('urlstate: decode never throws on garbage and rejects markup in ids', () => {
+  for (const g of ['', '=', '====&&&', '%E0%A4%A', 'a', '&&&&', null, undefined, 42, {}, 'x'.repeat(5000)]) {
+    assert.doesNotThrow(() => SDX.urlstate.decode(g), `input ${String(g).slice(0, 12)}`);
+    assert.deepEqual(J(SDX.urlstate.decode(g)), {});
+  }
+  const d = J(SDX.urlstate.decode('a=<script>alert(1)</script>&s=../../etc&t=<b>'));
+  assert.deepEqual(d, {});
+  assert.deepEqual(J(SDX.urlstate.decode('#t=hotspots')), { tab: 'hotspots' });
+});
+
+test('urlstate: encode drops invalid values instead of writing them', () => {
+  const s = SDX.urlstate.encode({ hour: NaN, radiusMi: Infinity, hood: '<x>', filters: ['openNow', 'near', 'bogus'], layers: ['sat', 'bogus'], sel: 'a b' });
+  assert.equal(s, 'l=sat&f=openNow');
+});
+
+// ================================================================ radar + storm alerts
+test('alerts: tropical, hurricane, winter-storm and freeze notices are kept; marine-only ones are not', () => {
+  const now = Date.parse('2026-10-06T06:00:00-07:00');
+  const f = (id, event, severity) => ({ properties: { id, event, severity, ends: '2026-10-08T20:00:00-07:00', headline: event, areaDesc: 'San Diego County Coastal Areas' } });
+  const json = { features: [
+    f('a', 'Tropical Storm Warning', 'Severe'), f('b', 'Hurricane Watch', 'Severe'), f('c', 'Winter Storm Warning', 'Severe'),
+    f('d', 'Freeze Warning', 'Moderate'), f('e', 'Storm Surge Warning', 'Extreme'), f('f', 'Severe Thunderstorm Warning', 'Severe'),
+    f('g', 'Special Marine Warning', 'Minor'), f('h', 'Small Craft Advisory', 'Minor'), f('i', 'Winter Weather Advisory', 'Minor'),
+  ] };
+  const ids = Array.from(SDX.alerts.relevant(json, now), (a) => a.id).sort();
+  assert.deepEqual(ids, ['a', 'b', 'c', 'd', 'e', 'f', 'i']);
+});
+
+test('radar: six 10-minute frames, oldest first, newest is the live composite', () => {
+  const fr = Array.from(SDX.radar.frames());
+  assert.equal(fr.length, 6);
+  assert.deepEqual(fr.map((f) => f.minAgo), [50, 40, 30, 20, 10, 0]);
+  assert.equal(fr[5].id, 'nexrad-n0q-900913');
+  assert.equal(fr[0].id, 'nexrad-n0q-900913-m50m');
+  assert.equal(fr[4].id, 'nexrad-n0q-900913-m10m');
+});
+
+test('radar: tile url follows the Iowa State tile-cache pattern', () => {
+  assert.equal(SDX.radar.tileUrl('nexrad-n0q-900913-m10m', 7, 22, 51), 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913-m10m/7/22/51.png');
+  assert.match(SDX.radar.tileUrl('nexrad-n0q-900913', '{z}', '{x}', '{y}'), /\/\{z\}\/\{x\}\/\{y\}\.png$/);
+});
+
+test('radar: a few tiles cover the county and the pixel boxes stay inside each tile', () => {
+  const tiles = Array.from(SDX.radar.countyTiles(7));
+  assert.ok(tiles.length >= 1 && tiles.length <= 4, `tiles=${tiles.length}`);
+  const centre = SDX.sat.tileXY(32.85, -117.0, 7);
+  assert.ok(tiles.some((t) => t.x === centre.x && t.y === centre.y));
+  let area = 0;
+  for (const t of tiles) {
+    const b = SDX.radar.pixelBox(t, 7);
+    assert.ok(b && b.x0 >= 0 && b.y0 >= 0 && b.x1 <= 256 && b.y1 <= 256 && b.x1 > b.x0 && b.y1 > b.y0);
+    area += (b.x1 - b.x0) * (b.y1 - b.y0);
+  }
+  // county is ~1.54 deg wide by ~1 deg tall: ~140 x ~100 px at zoom 7 (pixels are ~2.8125/256 deg wide)
+  assert.ok(area > 120 * 80 && area < 170 * 130, `area=${area}`);
+  assert.equal(SDX.radar.pixelBox({ x: 0, y: 0 }, 7), null);
+});
+
+test('radar: echoCount counts non-transparent pixels inside the box only', () => {
+  const w = 4, h = 4;
+  const rgba = new Uint8ClampedArray(w * h * 4);
+  const put = (x, y, a) => { rgba[(y * w + x) * 4 + 3] = a; };
+  put(0, 0, 255); put(1, 1, 200); put(2, 2, 3); put(3, 3, 255);
+  const all = SDX.radar.echoCount(rgba, w, h, { x0: 0, y0: 0, x1: 4, y1: 4 });
+  assert.deepEqual({ echo: all.echo, total: all.total }, { echo: 3, total: 16 }); // alpha 3 is rounding noise, not rain
+  const part = SDX.radar.echoCount(rgba, w, h, { x0: 0, y0: 0, x1: 2, y1: 2 });
+  assert.deepEqual({ echo: part.echo, total: part.total }, { echo: 2, total: 4 });
+});
+
+test('radar: classify and trend words, with NaN-safe input', () => {
+  const C = SDX.radar.classify;
+  assert.equal(C(0, 1000).key, 'none');
+  assert.equal(C(2, 1000).key, 'none');
+  assert.equal(C(20, 1000).key, 'isolated');
+  assert.equal(C(120, 1000).key, 'scattered');
+  assert.equal(C(400, 1000).key, 'widespread');
+  assert.equal(C(5, 0), null);
+  assert.equal(C(NaN, 1000), null);
+  const T = SDX.radar.trend;
+  assert.equal(T(0.2, 0.05), 'increasing');
+  assert.equal(T(0.05, 0.2), 'decreasing');
+  assert.equal(T(0.1, 0.11), 'steady');
+  assert.equal(T(0, 0), 'none');
+  assert.equal(T(null, 0.1), null);
+  assert.equal(T(NaN, 0.1), null);
+});
+
+test('urlstate: the radar layer round-trips', () => {
+  assert.equal(SDX.urlstate.encode({ layers: ['radar', 'sat'] }), 'l=sat,radar');
+  assert.deepEqual(J(SDX.urlstate.decode('l=radar,wind,zzz')), { layers: ['wind', 'radar'] });
+});
+
+test('sat: candidates walk back from the advertised newest frame in 10-minute steps', () => {
+  assert.deepEqual(Array.from(SDX.sat.candidates('2026-10-06T05:20:00Z', 3)), ['2026-10-06T05:20:00Z', '2026-10-06T05:10:00Z', '2026-10-06T05:00:00Z']);
+  assert.deepEqual(Array.from(SDX.sat.candidates('2026-10-06T00:00:00Z', 2)), ['2026-10-06T00:00:00Z', '2026-10-05T23:50:00Z']);
+  assert.throws(() => SDX.sat.candidates('nope', 2), /satellite/i);
+});

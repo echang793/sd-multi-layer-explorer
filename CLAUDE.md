@@ -74,6 +74,31 @@ node scripts/fetch-pois.mjs          # add --dry-run to only report counts
   - Geometry repaints only when `fogFactor` changes.
   - Drift and breathing are CSS transform/opacity animations on the panes (compositor-only).
 
+## Live sky & sea (Microclimates)
+- All sources are free, keyless and CORS-open. They are fetched in the `LiveSky` data layer (app block) with a 12 s timeout and a poll/back-off (10 min after a failure). A source that is down shows "unavailable"; nothing is ever filled with simulated numbers.
+  - Alerts: NWS `alerts/active?point=` at 3 points (coast, valleys, mountains), every 10 min. `SDX.alerts.relevant` keeps heat/fog/surf/wind/fire/flood/air-quality events and drops expired ones; `group` folds per-zone duplicates.
+  - Station readings: NWS `stations/{id}/observations/latest` for 10 airports (`SDX.obs.STATIONS`). The ± chip compares with the NWS forecast grid of the nearest area at the reading's hour, so it only appears with Data = Live.
+  - Sea & air: NOAA CO-OPS 9410230 (La Jolla water temp), Open-Meteo marine (waves, period) and air-quality (US AQI). Open-Meteo's free API is for non-commercial use.
+  - Satellite: NASA GIBS `GOES-West_ABI_GeoColor`. The newest frame time comes from the layer's WMTS capabilities `<Default>`, then one tile is probed (GIBS 404s for frames it doesn't have). 8 frames, 40 min apart, crossfaded by opacity in the `sat` pane. Frames are typically 1-1.5 h behind real time and the label says so. It's an IR image at night.
+  - Radar: NEXRAD composite tiles from Iowa State (`mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913[-mNNm]`): the live frame plus five 10-minute-old ones, crossfaded in the `radar` pane. The "rain over the county" line is computed from the tiles themselves (echo pixels inside the county box now vs 30 min ago, `SDX.radar.*`), and is polled every 5 min while Microclimates is active even if the layer is off. It reports radar echoes only; it does not predict arrival or speed of a storm.
+  - Alert types kept by `SDX.alerts.relevant` (`ALERT_RE`) include tropical/hurricane/storm (thunderstorm, winter, surge), freeze/frost and winter weather, besides heat/fog/surf/wind/fire/flood/air quality.
+  - Satellite probe starts one frame back from GIBS's advertised newest (that frame's tiles often 404, which also logs a console error) and walks back up to an hour.
+  - Wind: from the same NWS grid fetch as temperature (`windSpeed`/`windDirection`), so wind needs Data = Live (turning Wind on switches it). Grid cache key is `sdx.nws.grid2.*`.
+  - "Clears around…" in the marine card comes from `SDX.nws.clearingHour` on the coastal average sky cover.
+- Not used on purpose: NDBC buoy text (no CORS), Yelp/Google ratings (paid).
+- Test a failure with `window.SDXDebug = { fail: ['alerts', 'obs', 'sea', 'air', 'sat'] }` (set before load).
+- The sun-following basemap brightness is a CSS variable (`--tile-b`) on the map container, set only while Microclimates is focused with the tint on.
+
+## Crawls, URL state, install
+- `SDX.crawl.arrival(stops, startAt)` checks every crawl stop's hours at the time you'd arrive (`open` is `true`/`false`/`null`; `tight` = closes within 30 min of arrival). `SDX.crawl.status` drives the closing/opening-soon pin badges (within 45 min). Routes to stops that will be closed are drawn red.
+- The address-bar hash is the shareable state (`SDX.urlstate`: `t` tab, `h` hour, `src`, `m`, `l` layers, `a` area, `f` filters, `r` radius, `v` view, `s` shared crawl). `decode` clamps and whitelists everything and never throws. The app rewrites the hash about once a second via `replaceState`; pasting a different hash reloads. Near Me is deliberately not shared.
+- `sw.js` + `manifest.webmanifest` make it installable. The service worker caches only the shell and CDN libraries; live data is never cached, so offline the data panels say "unavailable". Bump `VERSION` in `sw.js` if the cache strategy changes (HTML is network-first, so normal deploys need no bump).
+- On phones the dock is a bottom sheet with three stops (peek/half/full), moved with transform only. `App.flyTo` pads by the visible part of the dock (`--sheet-y`).
+
+## CI
+- `.github/workflows/pages.yml`: tests (also under `TZ=Asia/Tokyo`) and lint must pass before deploy; PRs run the tests but don't deploy.
+- `.github/workflows/refresh-pois.yml`: monthly Overpass pull that opens a PR (never pushes to main). A PR created with `GITHUB_TOKEN` needs the repo setting Actions → General → "Allow GitHub Actions to create and approve pull requests".
+
 ## Gotchas
 - CARTO basemaps need a free per-person API key since 2026-09-23. Without one, tiles show an "API KEY REQUIRED" watermark while still returning HTTP 200.
   - The key is saved from the map-icon popover into localStorage `sdx.cartoKey`. Never hardcode it.
